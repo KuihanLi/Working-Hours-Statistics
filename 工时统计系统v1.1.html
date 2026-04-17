@@ -1,0 +1,2404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工时统计系统</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pinyin-pro@3.24.2/dist/index.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--surface:#161b22;--surface2:#21262d;--border:#30363d;
+  --text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;--accent2:#79b8ff;
+  --green:#3fb950;--yellow:#d29922;--red:#f85149;--orange:#db6d28;
+  --shadow:rgba(0,0,0,.45);
+  --radius:6px;
+}
+body.light{
+  --bg:#f3f4f6;--surface:#ffffff;--surface2:#e9ebee;--border:#d0d5dd;
+  --text:#1a1d23;--muted:#6b7280;--accent:#2563eb;--accent2:#1d4ed8;
+  --green:#16a34a;--yellow:#b45309;--red:#dc2626;--shadow:rgba(0,0,0,.14);
+}
+body{transition:background .2s,color .2s}
+body{font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei','微软雅黑',sans-serif;
+  background:var(--bg);color:var(--text);height:100vh;overflow:hidden;display:flex;flex-direction:column;}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+/* ── Buttons ── */
+.btn{padding:5px 12px;border-radius:var(--radius);border:1px solid var(--border);
+  background:var(--surface2);color:var(--text);cursor:pointer;font-size:13px;
+  transition:all .15s;font-family:inherit;white-space:nowrap}
+.btn:hover{background:var(--border)}
+.btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn-primary:hover{background:var(--accent2)}
+.btn-sm{padding:3px 9px;font-size:12px}
+.btn-danger{color:var(--red);border-color:var(--red);background:transparent}
+.btn-danger:hover{background:var(--red);color:#fff}
+.btn-icon{width:28px;height:28px;display:inline-flex;align-items:center;
+  justify-content:center;border-radius:var(--radius);border:1px solid var(--border);
+  background:var(--surface2);cursor:pointer;font-size:14px;color:var(--text);
+  transition:all .15s;line-height:1}
+.btn-icon:hover{background:var(--border)}
+
+/* ── Header ── */
+.header{background:var(--surface);border-bottom:1px solid var(--border);
+  padding:8px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;
+  box-shadow:0 1px 10px var(--shadow)}
+.logo{font-size:15px;font-weight:700;color:var(--accent);letter-spacing:.5px;
+  display:flex;align-items:center;gap:6px}
+.logo span{font-size:18px}
+.sep{width:1px;height:20px;background:var(--border)}
+.spacer{flex:1}
+.view-toggle{display:flex;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.view-toggle button{padding:4px 14px;background:transparent;border:none;
+  color:var(--muted);cursor:pointer;font-size:13px;font-family:inherit;transition:all .15s}
+.view-toggle button.active{background:var(--accent);color:#fff}
+.view-toggle button:not(.active):hover{background:var(--surface2);color:var(--text)}
+.date-nav{display:flex;align-items:center;gap:6px}
+.date-label{font-size:13px;font-weight:600;min-width:175px;text-align:center;color:var(--text)}
+.date-label.today-indicator{color:var(--accent)}
+
+/* ── Layout ── */
+.app-body{display:flex;flex:1;overflow:hidden}
+
+/* ── Sidebar ── */
+.sidebar{width:195px;background:var(--surface);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;flex-shrink:0}
+.sidebar-head{padding:8px;border-bottom:1px solid var(--border);position:relative}
+.sidebar-head .search-wrap{position:relative;display:flex;align-items:center}
+.sidebar-head input{width:100%;padding:6px 28px 6px 10px;background:var(--bg);border:1px solid var(--border);
+  border-radius:var(--radius);color:var(--text);font-size:12px;outline:none;font-family:inherit}
+.sidebar-head input:focus{border-color:var(--accent)}
+.sidebar-head input::placeholder{color:var(--muted)}
+.person-list{flex:1;overflow-y:auto;padding:4px}
+.person-item{display:flex;align-items:center;justify-content:space-between;
+  padding:6px 8px;border-radius:var(--radius);cursor:default;
+  transition:background .1s;position:relative;gap:4px}
+.person-item:hover{background:var(--surface2)}
+.person-item .pname{font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.person-item .phours{font-size:11px;color:var(--muted);font-family:'SF Mono','Consolas',monospace;
+  background:var(--surface2);padding:1px 5px;border-radius:3px;flex-shrink:0}
+.person-item:hover .phours{display:none}
+.person-item .pdel{display:none;font-size:11px;color:var(--red);cursor:pointer;
+  padding:1px 5px;border-radius:3px;border:1px solid var(--red);flex-shrink:0}
+.person-item:hover .pdel{display:block}
+.person-item .pdel:hover{background:var(--red);color:#fff}
+.sidebar-foot{padding:8px;border-top:1px solid var(--border);font-size:11px;
+  color:var(--muted);line-height:1.6}
+.sidebar-foot-actions{display:flex;gap:5px;margin-top:6px}
+
+/* ── Main ── */
+.main{flex:1;overflow:auto;padding:14px;background:var(--bg)}
+
+/* ── Grid Table ── */
+.grid-wrap{overflow:auto;border-radius:8px;border:1px solid var(--border)}
+.grid-table{width:100%;border-collapse:collapse;min-width:500px;table-layout:auto}
+.grid-table th{background:var(--surface);border:1px solid var(--border);
+  padding:7px 10px;font-size:12px;font-weight:600;text-align:center;white-space:nowrap}
+.grid-table th.col-name{text-align:left;min-width:78px;position:sticky;left:0;z-index:3;
+  background:var(--surface)}
+.grid-table td{border:1px solid var(--border);background:var(--bg);vertical-align:middle;
+  padding:4px 8px;text-align:center}
+.grid-table td.col-name{text-align:left;font-size:13px;font-weight:500;
+  background:var(--surface);position:sticky;left:0;z-index:1;padding:6px 10px}
+.grid-table tr:hover td{background:rgba(88,166,255,.04)}
+.grid-table tr:hover td.col-name{background:var(--surface)}
+.th-type{border-top:3px solid;padding-top:5px!important}
+/* Total row */
+.row-total td{background:var(--surface)!important;font-weight:600}
+.row-total td.col-name{font-weight:700}
+/* Counter */
+.counter-wrap{display:flex;align-items:center;justify-content:center;gap:7px;padding:2px 0}
+.cbtn{width:26px;height:26px;border-radius:5px;border:1px solid var(--border);
+  background:var(--surface2);color:var(--text);cursor:pointer;font-size:17px;
+  display:flex;align-items:center;justify-content:center;line-height:1;
+  transition:all .12s;font-family:monospace;flex-shrink:0;user-select:none}
+.cbtn:not(:disabled):hover.minus{background:var(--red);border-color:var(--red);color:#fff}
+.cbtn:not(:disabled):hover.plus{background:var(--green);border-color:var(--green);color:#fff}
+.cbtn:disabled{opacity:.25;cursor:not-allowed}
+.cval{font-size:15px;font-weight:700;min-width:22px;text-align:center;
+  font-family:'SF Mono','Consolas',monospace;line-height:1}
+.chours{font-size:10px;color:var(--muted);text-align:center;margin-top:1px}
+/* Week cell */
+.wcell{font-size:14px;font-weight:600;font-family:'SF Mono','Consolas',monospace;
+  cursor:pointer;padding:8px;display:block}
+.wcell.zero{color:var(--muted);font-weight:400}
+.wcell.has-data{color:var(--accent)}
+/* Week day header */
+.wdh{display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer}
+.wdh .wd-name{font-size:11px;color:var(--muted)}
+.wdh .wd-date{font-size:13px;font-weight:600}
+.wdh.is-today .wd-name,.wdh.is-today .wd-date{color:var(--accent)}
+.today-pill{font-size:9px;background:var(--accent);color:#fff;padding:1px 4px;border-radius:3px}
+/* Total col */
+.col-total{background:var(--surface)!important}
+td.col-total{color:var(--yellow)!important;font-weight:600;font-family:'SF Mono','Consolas',monospace}
+
+/* ── Badges ── */
+.badge{display:inline-flex;align-items:center;gap:3px;padding:1px 7px;
+  border-radius:4px;font-size:11px;font-weight:600;border:1px solid}
+
+
+
+
+/* ── Raw grid view ── */
+.raw-grid-wrap{overflow:auto;max-height:420px;border:1px solid var(--border);border-radius:6px;margin:8px 0}
+.raw-grid{border-collapse:collapse;font-size:11px;white-space:nowrap}
+.raw-grid td,.raw-grid th{
+  border:1px solid var(--border);padding:3px 6px;min-width:28px;max-width:120px;
+  overflow:hidden;text-overflow:ellipsis;text-align:center;line-height:1.4}
+.raw-grid th{background:var(--surface2);font-weight:600;position:sticky;top:0;z-index:3}
+.raw-grid th.row-hdr{position:sticky;left:0;z-index:4}
+.raw-grid td.row-hdr{background:var(--surface2);font-weight:600;position:sticky;left:0;z-index:2;color:var(--muted);font-size:10px}
+.raw-grid .cell-matched{background:var(--green)33!important;color:var(--green)!important;font-weight:700;border-color:var(--green)88!important}
+.raw-grid .cell-type{background:var(--accent)22!important;color:var(--accent)!important;font-weight:600}
+.raw-grid .cell-header{background:var(--surface2)!important;color:var(--muted)!important;font-style:italic}
+.raw-grid .cell-unmatched{background:var(--yellow)22!important;color:var(--yellow)!important;border-color:var(--yellow)88!important}
+.raw-grid .cell-empty{color:var(--border)}
+.preview-tabs{display:flex;gap:0;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:10px}
+.preview-tab{flex:1;padding:5px 10px;text-align:center;font-size:12px;cursor:pointer;
+  background:transparent;border:none;color:var(--muted);font-family:inherit;transition:all .15s}
+.preview-tab.active{background:var(--accent);color:#fff}
+.preview-tab:not(.active):hover{background:var(--surface2);color:var(--text)}
+
+
+/* ── Editable template table ── */
+.edit-tbl{width:100%;border-collapse:collapse;font-size:12px}
+.edit-tbl th{background:var(--surface2);border:1px solid var(--border);
+  padding:5px 8px;text-align:center;position:sticky;top:0;z-index:2;white-space:nowrap}
+.edit-tbl th.col-name{text-align:left;min-width:70px}
+.edit-tbl td{border:1px solid var(--border);padding:3px 5px;vertical-align:top}
+.edit-tbl td.col-name{font-weight:600;background:var(--surface);position:sticky;left:0;z-index:1}
+.edit-tbl tr:hover td{background:var(--surface2)22}
+.edit-tbl tr:hover td.col-name{background:var(--surface)}
+.edit-cell{display:flex;flex-direction:column;gap:2px;min-width:70px}
+.edit-entry{display:flex;align-items:center;gap:3px;padding:2px 4px;
+  border-radius:4px;background:var(--surface2);border:1px solid var(--border)}
+.edit-entry select{background:transparent;border:none;color:var(--text);
+  font-size:11px;font-family:inherit;cursor:pointer;outline:none;padding:0;max-width:55px}
+.edit-entry input[type=number]{width:32px;background:transparent;border:none;
+  color:var(--text);font-size:11px;font-family:'SF Mono','Consolas',monospace;
+  text-align:center;outline:none;padding:0}
+.edit-entry .del-entry{color:var(--muted);cursor:pointer;font-size:10px;line-height:1;
+  flex-shrink:0;padding:0 2px}
+.edit-entry .del-entry:hover{color:var(--red)}
+.add-entry-btn{font-size:11px;padding:2px 5px;margin-top:2px;cursor:pointer;
+  color:var(--accent);border:1px dashed var(--accent);border-radius:4px;
+  background:transparent;font-family:inherit;width:100%;text-align:center}
+.add-entry-btn:hover{background:var(--accent)15}
+.add-person-row{display:flex;gap:6px;align-items:center;padding:8px 0;
+  border-top:1px dashed var(--border);margin-top:6px;flex-wrap:wrap}
+.add-person-row select,.add-person-row input{padding:4px 7px;border-radius:var(--radius);
+  border:1px solid var(--border);background:var(--bg);color:var(--text);
+  font-size:12px;font-family:inherit;outline:none}
+.add-person-row select:focus,.add-person-row input:focus{border-color:var(--accent)}
+
+/* ── Diff mode ── */
+.diff-on .counter-wrap{position:relative}
+.diff-badge{position:absolute;bottom:2px;right:3px;font-size:9px;font-weight:700;
+  line-height:1;padding:1px 3px;border-radius:3px;font-family:'SF Mono','Consolas',monospace;
+  pointer-events:none;z-index:2}
+.diff-badge.pos{background:var(--green)33;color:var(--green);border:1px solid var(--green)66}
+.diff-badge.neg{background:var(--red)33;color:var(--red);border:1px solid var(--red)66}
+.diff-badge.zero{background:var(--muted)22;color:var(--muted);border:1px solid var(--muted)44}
+.diff-active-btn{background:var(--accent)!important;color:#fff!important;border-color:var(--accent)!important}
+/* Week diff cell */
+.wcell-wrap{position:relative;display:inline-block}
+.wdiff-badge{position:absolute;bottom:-1px;right:0;font-size:9px;font-weight:700;
+  padding:1px 3px;border-radius:3px;font-family:'SF Mono','Consolas',monospace;
+  line-height:1;pointer-events:none}
+.wdiff-badge.pos{background:var(--green)33;color:var(--green);border:1px solid var(--green)66}
+.wdiff-badge.neg{background:var(--red)33;color:var(--red);border:1px solid var(--red)66}
+.wdiff-badge.zero{background:var(--muted)22;color:var(--muted);border:1px solid var(--muted)44}
+
+/* ── Calendar Picker ── */
+.cal-anchor{position:relative;display:inline-flex;align-items:center}
+.cal-popup{position:absolute;top:calc(100% + 6px);left:50%;transform:translateX(-50%);
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  box-shadow:0 8px 32px var(--shadow);z-index:500;padding:14px;width:266px;
+  animation:calIn .12s ease}
+@keyframes calIn{from{opacity:0;transform:translateX(-50%) translateY(-6px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+.cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.cal-title{font-size:13px;font-weight:700;cursor:pointer;padding:3px 8px;border-radius:5px;
+  transition:background .12s}
+.cal-title:hover{background:var(--surface2)}
+.cal-nav{width:26px;height:26px;display:flex;align-items:center;justify-content:center;
+  border-radius:5px;border:1px solid var(--border);background:var(--surface2);
+  cursor:pointer;font-size:14px;color:var(--text);transition:background .12s;user-select:none}
+.cal-nav:hover{background:var(--border)}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.cal-wd{font-size:10px;color:var(--muted);text-align:center;padding:3px 0;font-weight:600}
+.cal-day{font-size:12px;text-align:center;padding:5px 2px;border-radius:5px;
+  cursor:pointer;transition:all .1s;line-height:1.3;border:1px solid transparent}
+.cal-day:hover{background:var(--surface2)}
+.cal-day.other-month{color:var(--border)}
+.cal-day.is-today{color:var(--accent);font-weight:700}
+.cal-day.selected{background:var(--accent)!important;color:#fff!important;border-color:var(--accent)}
+.cal-day.in-week{background:rgba(88,166,255,.12);border-color:rgba(88,166,255,.2)}
+.cal-day.week-start{border-radius:5px 0 0 5px}
+.cal-day.week-end{border-radius:0 5px 5px 0}
+.cal-day.has-data::after{content:'';display:block;width:4px;height:4px;border-radius:50%;
+  background:currentColor;margin:1px auto 0;opacity:.7}
+.cal-day.empty{cursor:default}
+.cal-month-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:4px}
+.cal-month-item{padding:7px 4px;border-radius:6px;text-align:center;font-size:12px;
+  cursor:pointer;border:1px solid transparent;transition:all .1s}
+.cal-month-item:hover{background:var(--surface2)}
+.cal-month-item.selected{background:var(--accent);color:#fff}
+.cal-year-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:4px}
+.cal-year-item{padding:6px 2px;border-radius:6px;text-align:center;font-size:12px;
+  cursor:pointer;border:1px solid transparent;transition:all .1s}
+.cal-year-item:hover{background:var(--surface2)}
+.cal-year-item.selected{background:var(--accent);color:#fff}
+.cal-footer{margin-top:10px;display:flex;gap:6px}
+
+
+/* ── Visibility checkbox ── */
+.person-item .pcheck{
+  width:14px;height:14px;flex-shrink:0;cursor:pointer;accent-color:var(--accent);
+  margin-right:1px}
+.person-item.hidden-row .pname{color:var(--muted);text-decoration:line-through}
+.person-item.hidden-row .phours{opacity:.4}
+.sidebar-toolbar{display:flex;gap:4px;padding:5px 8px;border-bottom:1px solid var(--border);
+  flex-wrap:wrap}
+.sidebar-toolbar button{flex:1;font-size:10px;padding:3px 4px;min-width:0}
+.hide-count{display:inline-flex;align-items:center;justify-content:center;
+  min-width:16px;height:16px;border-radius:8px;background:var(--yellow);
+  color:#000;font-size:9px;font-weight:700;margin-left:3px;padding:0 3px}
+
+/* ── Theme toggle ── */
+.theme-btn{width:30px;height:30px;display:flex;align-items:center;justify-content:center;
+  border-radius:var(--radius);border:1px solid var(--border);background:var(--surface2);
+  cursor:pointer;font-size:15px;transition:all .15s;flex-shrink:0}
+.theme-btn:hover{background:var(--border)}
+/* ── Template badge ── */
+.tpl-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;
+  border-radius:var(--radius);font-size:12px;background:var(--yellow)22;
+  border:1px solid var(--yellow);color:var(--yellow);font-weight:600}
+.tpl-badge .tpl-name{max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+
+/* ── Schedule Import Modal ── */
+.sched-table-wrap{overflow:auto;max-height:320px;border:1px solid var(--border);border-radius:6px;margin:10px 0}
+.sched-table{width:100%;border-collapse:collapse;font-size:12px}
+.sched-table th{background:var(--surface2);border:1px solid var(--border);padding:5px 8px;
+  white-space:nowrap;position:sticky;top:0;z-index:2}
+.sched-table td{border:1px solid var(--border);padding:4px 7px;vertical-align:top}
+.sched-table td.type-cell{background:var(--surface2);font-weight:600;white-space:nowrap;max-width:140px}
+.sched-table .type-badge{display:inline-flex;align-items:center;gap:3px;
+  padding:1px 5px;border-radius:3px;font-size:11px;font-weight:600;border:1px solid}
+.name-chip{display:inline-flex;align-items:center;gap:2px;padding:1px 5px;margin:1px;
+  border-radius:3px;font-size:11px;border:1px solid}
+.name-chip.ok{color:var(--green);border-color:var(--green);background:var(--green)1a}
+.name-chip.warn{color:var(--yellow);border-color:var(--yellow);background:var(--yellow)1a}
+.name-chip.err{color:var(--red);border-color:var(--red);background:var(--red)1a}
+.rule-row{display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap}
+.rule-row .arr{color:var(--muted);flex-shrink:0}
+.rule-sel{padding:4px 8px;border-radius:var(--radius);border:1px solid var(--border);
+  background:var(--bg);color:var(--text);font-size:12px;font-family:inherit;cursor:pointer;outline:none}
+.rule-sel:focus{border-color:var(--accent)}
+.step-tabs{display:flex;gap:0;border:1px solid var(--border);border-radius:var(--radius);
+  overflow:hidden;margin-bottom:14px}
+.step-tab{flex:1;padding:6px;text-align:center;font-size:12px;font-weight:600;cursor:pointer;
+  background:transparent;border:none;color:var(--muted);font-family:inherit;transition:all .15s}
+.step-tab.active{background:var(--accent);color:#fff}
+.step-tab.done{color:var(--green)}
+.step-num{display:inline-flex;width:18px;height:18px;border-radius:50%;background:currentColor;
+  color:var(--surface);align-items:center;justify-content:center;font-size:10px;margin-right:4px}
+
+/* ── Modal ── */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;
+  align-items:center;justify-content:center;z-index:200;backdrop-filter:blur(4px)}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  padding:22px;width:480px;max-width:calc(100vw - 32px);max-height:85vh;overflow-y:auto}
+.modal-lg{width:560px}
+.modal-sm{width:320px}
+.modal-title{font-size:15px;font-weight:700;margin-bottom:16px;
+  display:flex;align-items:center;justify-content:space-between}
+.modal-title .close{background:none;border:none;color:var(--muted);
+  cursor:pointer;font-size:17px;padding:0;line-height:1}
+.modal-title .close:hover{color:var(--text)}
+/* Form */
+.field{margin-bottom:11px}
+.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+.inp{width:100%;padding:7px 10px;background:var(--bg);border:1px solid var(--border);
+  border-radius:var(--radius);color:var(--text);font-size:13px;outline:none;
+  font-family:inherit;transition:border-color .15s}
+.inp:focus{border-color:var(--accent)}
+textarea.inp{resize:vertical;min-height:130px;line-height:1.65}
+.inp-sm{width:80px}
+.form-row{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.form-row .inp{flex:1}
+/* Type list item */
+.type-item{display:flex;align-items:center;gap:8px;padding:8px;
+  background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);
+  margin-bottom:7px}
+.color-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0}
+/* Color picker */
+
+input[type=date]{color-scheme:dark}
+body.light input[type=date]{color-scheme:light}
+input[type=color]{width:32px;height:32px;border:none;background:none;
+  cursor:pointer;padding:0;flex-shrink:0;border-radius:4px}
+/* Radio row */
+.radio-row{display:flex;align-items:center;gap:14px;font-size:13px}
+.radio-row label{display:flex;align-items:center;gap:5px;cursor:pointer}
+/* Divider */
+.divider{border:none;border-top:1px solid var(--border);margin:12px 0}
+/* Empty */
+.empty{text-align:center;padding:50px 20px;color:var(--muted)}
+.empty .icon{font-size:36px;margin-bottom:10px}
+.empty p{font-size:13px}
+/* Tag */
+.tag-section{font-size:11px;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.5px;margin-bottom:8px;margin-top:12px;font-weight:600}
+/* Info row */
+.info-bar{display:flex;gap:16px;margin-bottom:12px;font-size:12px;color:var(--muted);
+  align-items:center;flex-wrap:wrap}
+.info-bar .info-item{display:flex;align-items:center;gap:4px}
+.info-bar .info-val{color:var(--text);font-weight:600}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>document.body.classList.toggle("light",localStorage.getItem("wh_theme")==="light")</script>
+<script type="text/babel">
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+/* ═══ Pinyin Search (via pinyin-pro) ══════════════════════════════════════ */
+function matchSearch(name, q) {
+  if (!q) return true;
+  const ql = q.toLowerCase().trim();
+  if (!ql) return true;
+  if (name.toLowerCase().includes(ql)) return true;
+  try {
+    const lib = window.pinyinPro;
+    if (lib) {
+      const initials = lib.pinyin(name, { pattern: 'first', toneType: 'none', separator: '' });
+      if (initials.toLowerCase().includes(ql)) return true;
+      const full = lib.pinyin(name, { toneType: 'none', separator: '' });
+      if (full.toLowerCase().includes(ql)) return true;
+    }
+  } catch(e) {}
+  return false;
+}
+
+/* ═══ Date Utils ════════════════════════════════════════════════════════════ */
+function fmt(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function addDays(d, n) { const r=new Date(d); r.setDate(r.getDate()+n); return r; }
+function getMonday(d) {
+  const r=new Date(d); const day=r.getDay();
+  r.setDate(r.getDate()+(day===0?-6:1-day)); return r;
+}
+function weekDates(mon) { return Array.from({length:7},(_,i)=>addDays(mon,i)); }
+function isToday(d) {
+  const t=new Date();
+  return d.getFullYear()===t.getFullYear()&&d.getMonth()===t.getMonth()&&d.getDate()===t.getDate();
+}
+function fmtShort(d) { return `${d.getMonth()+1}/${d.getDate()}`; }
+function fmtMid(d) { return `${d.getMonth()+1}月${d.getDate()}日`; }
+
+const WD = ['周一','周二','周三','周四','周五','周六','周日'];
+const WD_FULL = ['周日','周一','周二','周三','周四','周五','周六'];
+
+/* ═══ Defaults ══════════════════════════════════════════════════════════════ */
+const DEF_TYPES = [
+  {id:'t1',name:'巡查',hours:1,  color:'#3fb950'},
+  {id:'t2',name:'值班1',hours:2, color:'#58a6ff'},
+  {id:'t3',name:'值班2',hours:2.5,color:'#d29922'},
+];
+const DEF_PERSONNEL = [
+  {id:'p1',name:'张三'},
+  {id:'p2',name:'李四'},
+  {id:'p3',name:'王五'},
+];
+
+let _id = 1000;
+function uid() { return `id_${++_id}_${Date.now()%100000}`; }
+
+function loadLS(key, def) {
+  try { const v=localStorage.getItem(key); return v?JSON.parse(v):def; } catch { return def; }
+}
+
+/* ═══ App ═══════════════════════════════════════════════════════════════════ */
+function App() {
+  const [personnel, setPersonnel] = useState(()=>loadLS('wh_personnel', DEF_PERSONNEL));
+  const [types, setTypes]         = useState(()=>loadLS('wh_types', DEF_TYPES));
+  const [records, setRecords]     = useState(()=>loadLS('wh_records', {}));
+  const [view, setView]           = useState('day');
+  const [curDate, setCurDate]     = useState(new Date());
+  const [search, setSearch]       = useState('');
+  const [modal, setModal]         = useState(null);
+  const [confirmCb, setConfirmCb] = useState(null);
+  const [theme, setTheme]         = useState(()=>loadLS('wh_theme','dark'));
+  const [template, setTemplate]   = useState(null);   // {name, data:{relDay(0-6):{pid_name:{tid_name:count}}}}
+  const [hiddenIds, setHiddenIds] = useState(()=>{ try{ return new Set(JSON.parse(localStorage.getItem('wh_hidden')||'[]')); }catch{ return new Set(); } });
+  const [autoHide,  setAutoHide]  = useState(()=>loadLS('wh_autohide', false));
+  const [showDiff,  setShowDiff]  = useState(false);
+  const importRecRef = useRef();
+  const importPplRef = useRef();
+  const importTplRef = useRef();
+
+  useEffect(()=>{ localStorage.setItem('wh_personnel',JSON.stringify(personnel)); },[personnel]);
+  useEffect(()=>{ localStorage.setItem('wh_types',JSON.stringify(types)); },[types]);
+  useEffect(()=>{ localStorage.setItem('wh_records',JSON.stringify(records)); },[records]);
+  useEffect(()=>{
+    localStorage.setItem('wh_hidden', JSON.stringify([...hiddenIds]));
+  },[hiddenIds]);
+  useEffect(()=>{
+    localStorage.setItem('wh_autohide', JSON.stringify(autoHide));
+  },[autoHide]);
+  // Auto-hide zero-hours people when autoHide is on and view/date changes
+  useEffect(()=>{
+    if (!autoHide) return;
+    setHiddenIds(()=>{
+      const n = new Set();
+      for (const p of personnel) {
+        const h = view==='day'
+          ? records?.[fmt(curDate)]?.[p.id]
+            ? types.reduce((s,t)=>s+((records[fmt(curDate)][p.id][t.id]||0)*t.hours),0)
+            : 0
+          : weekDates(getMonday(curDate)).reduce((s,d)=>{
+              const dr=records?.[fmt(d)]?.[p.id]||{};
+              return s+types.reduce((ss,t)=>ss+(dr[t.id]||0)*t.hours,0);
+            },0);
+        if (h===0) n.add(p.id);
+      }
+      return n;
+    });
+  },[autoHide, view, curDate, records]);
+  useEffect(()=>{
+    localStorage.setItem('wh_theme', theme);
+    document.body.classList.toggle('light', theme==='light');
+  },[theme]);
+
+  const monday  = useMemo(()=>getMonday(curDate),[curDate]);
+  const wDates  = useMemo(()=>weekDates(monday),[monday]);
+  const filtered        = useMemo(()=>{
+    const lib = window.pinyinPro;
+    return personnel
+      .filter(p=>matchSearch(p.name,search))
+      .sort((a,b)=>{
+        try {
+          if (lib) {
+            const pa = lib.pinyin(a.name,{toneType:'none',separator:''}).toLowerCase();
+            const pb = lib.pinyin(b.name,{toneType:'none',separator:''}).toLowerCase();
+            return pa.localeCompare(pb,'zh');
+          }
+        } catch{}
+        return a.name.localeCompare(b.name,'zh');
+      });
+  },[personnel,search]);
+  // When searching: ignore hiddenIds so all matches appear in table
+  const tablePersonnel  = useMemo(()=>search
+    ? filtered
+    : filtered.filter(p=>!hiddenIds.has(p.id)),
+  [filtered, hiddenIds, search]);
+  const curStr  = fmt(curDate);
+
+  // diffPersonnel: when diff mode on, add people who appear in template but not in tablePersonnel
+  const diffPersonnel = useMemo(()=>{
+    if (!showDiff || !template) return tablePersonnel;
+    const inTable = new Set(tablePersonnel.map(p=>p.id));
+    const extra = [];
+    // for day view: check relDay; for week view: check all 7 days
+    const checkDays = view==='day'
+      ? [curDate.getDay()===0?6:curDate.getDay()-1]
+      : [0,1,2,3,4,5,6];
+    for (const p of personnel) {
+      if (inTable.has(p.id)) continue;
+      const hasInTpl = checkDays.some(wd=>{
+        const d = template.data[wd];
+        return d && d[p.name] && Object.values(d[p.name]).some(v=>v>0);
+      });
+      if (hasInTpl) extra.push(p);
+    }
+    return [...tablePersonnel, ...extra];
+  },[showDiff, template, tablePersonnel, personnel, view, curDate]);
+  const todayStr= fmt(new Date());
+
+  /* ── Record helpers ── */
+  function getCount(dateStr, pid, tid) { return records?.[dateStr]?.[pid]?.[tid] || 0; }
+  function getTplCount(relDay, personName, typeName) {
+    return template?.data?.[relDay]?.[personName]?.[typeName] || 0;
+  }
+  function dayHours(dateStr, pid) {
+    const dr = records?.[dateStr]?.[pid] || {};
+    return types.reduce((s,t)=>s+(dr[t.id]||0)*t.hours, 0);
+  }
+  function weekHours(pid) {
+    return wDates.reduce((s,d)=>s+dayHours(fmt(d),pid), 0);
+  }
+  function totalHoursEver(pid) {
+    return Object.keys(records).reduce((s,d)=>s+dayHours(d,pid), 0);
+  }
+  function sidebarHours(pid) {
+    if (view==='day') return dayHours(curStr, pid);
+    return weekHours(pid);
+  }
+
+  function update(dateStr, pid, tid, delta) {
+    setRecords(prev => {
+      const r = JSON.parse(JSON.stringify(prev));
+      r[dateStr] = r[dateStr] || {};
+      r[dateStr][pid] = r[dateStr][pid] || {};
+      const cur = r[dateStr][pid][tid] || 0;
+      const nxt = Math.max(0, cur + delta);
+      if (nxt===0) {
+        delete r[dateStr][pid][tid];
+        if (!Object.keys(r[dateStr][pid]).length) delete r[dateStr][pid];
+        if (!Object.keys(r[dateStr]).length) delete r[dateStr];
+      } else {
+        r[dateStr][pid][tid] = nxt;
+      }
+      return r;
+    });
+  }
+
+  function navigate(delta) {
+    setCurDate(d => addDays(d, view==='week' ? delta*7 : delta));
+  }
+
+  /* ── Date label ── */
+  const dateLabel = useMemo(() => {
+    if (view==='day') {
+      return `${curDate.getFullYear()}年${curDate.getMonth()+1}月${curDate.getDate()}日 ${WD_FULL[curDate.getDay()]}`;
+    }
+    const sun = wDates[6];
+    return `${monday.getMonth()+1}月${monday.getDate()}日 — ${sun.getMonth()+1}月${sun.getDate()}日`;
+  }, [curDate, view, monday, wDates]);
+
+  const isCurrentToday = view==='day' && curStr===todayStr;
+  const isCurrentWeekHasToday = view==='week' && wDates.some(d=>fmt(d)===todayStr);
+
+  /* ── Export Excel ── */
+  function exportExcel(mode, rangeStart, rangeEnd) {
+    let allDates = Object.keys(records).sort();
+    if (!allDates.length) { alert('暂无记录可导出'); return; }
+    if (rangeStart) allDates = allDates.filter(d=>d>=rangeStart);
+    if (rangeEnd)   allDates = allDates.filter(d=>d<=rangeEnd);
+    if (!allDates.length) { alert('所选时间段内无记录'); return; }
+    const wb = XLSX.utils.book_new();
+
+    /* Sheet: 小时统计(按日) */
+    if (mode==='day'||mode==='both') {
+      const hdr = ['姓名', ...allDates.map(d=>d.slice(5)), '合计(h)'];
+      const body = personnel.map(p => {
+        let tot=0;
+        const row = [p.name, ...allDates.map(d=>{ const h=dayHours(d,p.id); tot+=h; return h||0; }), tot];
+        return row;
+      });
+      const foot = ['合计', ...allDates.map(d=>personnel.reduce((s,p)=>s+dayHours(d,p.id),0)),
+                    personnel.reduce((s,p)=>s+allDates.reduce((h,d)=>h+dayHours(d,p.id),0),0)];
+      const ws = XLSX.utils.aoa_to_sheet([hdr,...body,foot]);
+      _styleSheet(ws, allDates.length+2);
+      XLSX.utils.book_append_sheet(wb, ws, '小时统计(按日)');
+    }
+
+    /* Sheet: 小时统计(按周) */
+    if (mode==='week'||mode==='both') {
+      const weekMap = {};
+      for (const d of allDates) {
+        const mon = getMonday(new Date(d));
+        const key = fmt(mon);
+        const sun = addDays(mon,6);
+        if (!weekMap[key]) weekMap[key]={label:`${fmtMid(mon)}~${fmtMid(sun)}`,dates:[]};
+        weekMap[key].dates.push(d);
+      }
+      const wks = Object.keys(weekMap).sort();
+      const hdr = ['姓名', ...wks.map(k=>weekMap[k].label), '合计(h)'];
+      const body = personnel.map(p => {
+        let tot=0;
+        const row = [p.name, ...wks.map(k=>{ const h=weekMap[k].dates.reduce((s,d)=>s+dayHours(d,p.id),0); tot+=h; return h||0; }), tot];
+        return row;
+      });
+      const ws = XLSX.utils.aoa_to_sheet([hdr,...body]);
+      XLSX.utils.book_append_sheet(wb, ws, '小时统计(按周)');
+    }
+
+    /* Sheet: 工时明细 (importable raw data) */
+    {
+      const hdr = ['姓名','日期', ...types.map(t=>`${t.name}(次)`), ...types.map(t=>`${t.name}(h)`), '总计(h)'];
+      const rows = [];
+      for (const d of allDates) {
+        for (const p of personnel) {
+          const dr = records?.[d]?.[p.id];
+          if (!dr) continue;
+          const row = [p.name, d,
+            ...types.map(t=>dr[t.id]||0),
+            ...types.map(t=>(dr[t.id]||0)*t.hours),
+            dayHours(d,p.id)];
+          rows.push(row);
+        }
+      }
+      if (rows.length) {
+        const ws = XLSX.utils.aoa_to_sheet([hdr,...rows]);
+        XLSX.utils.book_append_sheet(wb, ws, '工时明细');
+      }
+    }
+
+    XLSX.writeFile(wb, `工时统计_${fmt(new Date())}.xlsx`);
+  }
+
+  function _styleSheet(ws, colCount) {
+    // Set column widths
+    ws['!cols'] = [{ wch:10 }, ...Array(colCount).fill({ wch:8 })];
+  }
+
+  /* ── Import Records ── */
+  function handleImportRecords(e) {
+    const file = e.target.files[0]; if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const wb = XLSX.read(ev.target.result, {type:'binary'});
+        const shName = wb.SheetNames.find(n=>n.includes('明细')) || wb.SheetNames[0];
+        const ws = wb.Sheets[shName];
+        const rows = XLSX.utils.sheet_to_json(ws, {header:1,defval:0});
+        if (rows.length < 2) { alert('表格格式不正确，请导入"工时明细"表'); return; }
+        const hdr = rows[0];
+        // Find type columns (after 姓名, 日期)
+        const typeNames = types.map(t=>t.name);
+        const typeColIdxs = typeNames.map(n => hdr.findIndex(h=>String(h).startsWith(n)&&String(h).endsWith('次)')));
+        const newRec = JSON.parse(JSON.stringify(records));
+        let count = 0;
+        for (let i=1;i<rows.length;i++) {
+          const row = rows[i];
+          const name = String(row[0]||'').trim();
+          const date = String(row[1]||'').trim();
+          if (!name||!date||!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+          const person = personnel.find(p=>p.name===name);
+          if (!person) continue;
+          types.forEach((t,j) => {
+            const idx = typeColIdxs[j];
+            if (idx<0) return;
+            const cnt = parseInt(row[idx])||0;
+            if (cnt>0) {
+              newRec[date]=newRec[date]||{};
+              newRec[date][person.id]=newRec[date][person.id]||{};
+              newRec[date][person.id][t.id]=cnt;
+              count++;
+            }
+          });
+        }
+        setRecords(newRec);
+        alert(`✅ 导入完成，共导入 ${count} 条记录`);
+      } catch(err) { alert('导入失败：'+err.message); }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value='';
+  }
+
+  /* ── Template import ── */
+  function handleImportTemplate(e) {
+    const file = e.target.files[0]; if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const wb = XLSX.read(ev.target.result, {type:'binary'});
+        const shName = wb.SheetNames.find(n=>n.includes('明细')) || wb.SheetNames[0];
+        const ws = wb.Sheets[shName];
+        const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:0});
+        if (rows.length < 2) { alert('表格格式不正确'); return; }
+        const hdr = rows[0];
+        const typeNames = types.map(t=>t.name);
+        const typeColIdxs = typeNames.map(n=>hdr.findIndex(h=>String(h).startsWith(n)&&String(h).endsWith('次)')));
+        // Parse dates, compute weekday offset (Mon=0..Sun=6)
+        const data = {}; // {relDay: {personName: {typeName: count}}}
+        let count = 0;
+        for (let i=1;i<rows.length;i++) {
+          const row = rows[i];
+          const name = String(row[0]||'').trim();
+          const dateStr = String(row[1]||'').trim();
+          if (!name||!dateStr||!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
+          const d = new Date(dateStr);
+          const dow = d.getDay(); // 0=Sun
+          const relDay = dow===0 ? 6 : dow-1; // Mon=0..Sun=6
+          if (!data[relDay]) data[relDay]={};
+          if (!data[relDay][name]) data[relDay][name]={};
+          types.forEach((t,j)=>{
+            const idx=typeColIdxs[j]; if(idx<0) return;
+            const cnt=parseInt(row[idx])||0;
+            if(cnt>0){ data[relDay][name][t.name]=cnt; count++; }
+          });
+        }
+        if (!count) { alert('未在模板中找到有效工时数据'); return; }
+        setTemplate({name: file.name.replace(/\.[^.]+$/,''), data});
+        alert(`✅ 模板「${file.name}」已缓存（${count} 条），切换到目标日期/周后点击「应用模板」覆盖`);
+      } catch(err) { alert('导入失败：'+err.message); }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value='';
+  }
+
+  /* ── Apply template to current view ── */
+  function applyTemplate() {
+    if (!template) return;
+    const apply = () => {
+      setRecords(prev => {
+        const r = JSON.parse(JSON.stringify(prev));
+        const applyDay = (dateStr, relDay) => {
+          const dayData = template.data[relDay];
+          if (!dayData) return;
+          for (const p of personnel) {
+            const pData = dayData[p.name];
+            if (!pData) continue;
+            r[dateStr] = r[dateStr] || {};
+            r[dateStr][p.id] = r[dateStr][p.id] || {};
+            for (const t of types) {
+              if (pData[t.name] != null) {
+                r[dateStr][p.id][t.id] = pData[t.name];
+              }
+            }
+          }
+        };
+        if (view==='week') {
+          wDates.forEach((d,i) => applyDay(fmt(d), i));
+        } else {
+          const dow = curDate.getDay();
+          const relDay = dow===0?6:dow-1;
+          applyDay(curStr, relDay);
+        }
+        return r;
+      });
+      setModal(null);
+    };
+    setConfirmCb(()=>apply);
+    setModal('confirm-tpl');
+  }
+
+  /* ── Visibility helpers ── */
+  function toggleHidden(id) {
+    setHiddenIds(prev => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  }
+  function hideUnworked() {
+    setHiddenIds(prev => {
+      const n = new Set(prev);
+      for (const p of personnel) {
+        const h = view==='day' ? dayHours(curStr, p.id) : weekHours(p.id);
+        if (h === 0) n.add(p.id);
+      }
+      return n;
+    });
+  }
+  function showAll() { setHiddenIds(new Set()); setAutoHide(false); }
+
+  /* ── Remove person ── */
+  function removePerson(id) {
+    setPersonnel(prev=>prev.filter(p=>p.id!==id));
+  }
+
+  /* ── Clear records only ── */
+  function clearAll() {
+    setConfirmCb(()=>()=>{ setRecords({}); setModal(null); });
+    setModal('confirm');
+  }
+
+  /* ── Clear ALL data ── */
+  function clearAllData() {
+    setConfirmCb(()=>()=>{
+      setRecords({}); setPersonnel([]); setTypes(DEF_TYPES);
+      setHiddenIds(new Set()); setTemplate(null);
+      localStorage.removeItem('wh_hidden');
+      setModal(null);
+    });
+    setModal('confirm-all');
+  }
+
+  /* ══ RENDER ══ */
+  return (
+    <div style={{display:'flex',flexDirection:'column',height:'100vh'}}>
+
+      {/* ── Header ── */}
+      <div className="header">
+        <div className="logo"><span>⏱</span>工时统计系统</div>
+        <div className="sep"/>
+
+        <div className="view-toggle">
+          <button className={view==='day'?'active':''} onClick={()=>setView('day')}>按天</button>
+          <button className={view==='week'?'active':''} onClick={()=>setView('week')}>按周</button>
+        </div>
+
+        <div className="date-nav">
+          <button className="btn-icon" onClick={()=>navigate(-1)}>‹</button>
+          <CalendarPicker
+            curDate={curDate}
+            setCurDate={setCurDate}
+            view={view}
+            records={records}
+            dateLabel={dateLabel}
+            isHighlight={isCurrentToday||isCurrentWeekHasToday}
+          />
+          <button className="btn-icon" onClick={()=>navigate(1)}>›</button>
+          <button className="btn btn-sm" onClick={()=>setCurDate(new Date())}>今天</button>
+        </div>
+
+        <div className="spacer"/>
+
+        {template && (
+          <div className="tpl-badge">
+            <span>📋</span>
+            <span className="tpl-name" title={template.name}>{template.name}</span>
+            <button className="btn btn-sm" style={{padding:'1px 7px',fontSize:'11px'}} onClick={applyTemplate}>应用模板</button>
+            <span style={{cursor:'pointer',fontSize:'12px',opacity:.7}} onClick={()=>setTemplate(null)}>✕</span>
+          </div>
+        )}
+        <div className="sep"/>
+        <button className="btn btn-sm" onClick={()=>setModal('types')}>⚙ 工时类型</button>
+        <button className="btn btn-sm" onClick={()=>setModal('people')}>👥 人员</button>
+        <input ref={importPplRef} type="file" accept=".xlsx,.xls,.csv" style={{display:'none'}}/>
+        <input ref={importRecRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleImportRecords}/>
+        <input ref={importTplRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleImportTemplate}/>
+        <button className="btn btn-sm" onClick={()=>importRecRef.current.click()}>📂 导入记录</button>
+        <button className="btn btn-sm" style={{color:'var(--yellow)',borderColor:'var(--yellow)'}} onClick={()=>importTplRef.current.click()}>📋 导入模板</button>
+        <button className="btn btn-sm" style={{color:'var(--green)',borderColor:'var(--green)'}} onClick={()=>setModal('schedule')}>📅 排班转模板</button>
+        <button className="btn btn-sm btn-primary" onClick={()=>setModal('export')}>📊 导出</button>
+        <button className="theme-btn" onClick={()=>setTheme(t=>t==='dark'?'light':'dark')} title="切换主题">
+          {theme==='dark'?'☀️':'🌙'}
+        </button>
+      </div>
+
+      <div className="app-body">
+
+        {/* ── Sidebar ── */}
+        <div className="sidebar">
+          <div className="sidebar-head">
+            <div className="search-wrap">
+              <input placeholder="搜索姓名 / 拼音首字母…" value={search} onChange={e=>setSearch(e.target.value)}/>
+              {search && (
+                <span onClick={()=>setSearch('')} style={{
+                  position:'absolute',right:'7px',cursor:'pointer',fontSize:'13px',
+                  color:'var(--muted)',lineHeight:1,userSelect:'none',padding:'2px'
+                }} title="清空搜索">✕</span>
+              )}
+            </div>
+          </div>
+
+          {/* Visibility toolbar */}
+          <div className="sidebar-toolbar">
+            {/* Auto-hide toggle */}
+            <label style={{display:'flex',alignItems:'center',gap:'4px',cursor:'pointer',
+              fontSize:'10px',padding:'2px 4px',borderRadius:'var(--radius)',
+              border:'1px solid var(--border)',background: autoHide?'var(--yellow)22':'var(--surface2)',
+              color: autoHide?'var(--yellow)':'var(--muted)',transition:'all .15s',flex:1,
+              userSelect:'none'}}
+              title="开启后切换日期/周时自动隐藏零工时人员">
+              <input type="checkbox" checked={autoHide} onChange={e=>setAutoHide(e.target.checked)}
+                style={{accentColor:'var(--yellow)',width:'12px',height:'12px',flexShrink:0}}/>
+              自动隐零工时
+            </label>
+            <button className="btn btn-sm" title="立即隐藏零工时人员"
+              onClick={hideUnworked} style={{color:'var(--yellow)',borderColor:'var(--yellow)'}}>
+              隐零工时
+            </button>
+            <button className="btn btn-sm" onClick={showAll}
+              style={{color:'var(--green)',borderColor:'var(--green)'}}>
+              全显
+              {!autoHide && hiddenIds.size>0 && <span className="hide-count">{hiddenIds.size}</span>}
+            </button>
+          </div>
+          <div className="sidebar-toolbar" style={{gap:'4px'}}>
+            <button className="btn btn-sm" onClick={()=>{
+                const allHidden = filtered.every(p=>hiddenIds.has(p.id));
+                setHiddenIds(prev=>{
+                  const n=new Set(prev);
+                  filtered.forEach(p=>allHidden?n.delete(p.id):n.add(p.id));
+                  return n;
+                });
+              }} style={{flex:1}} title="切换当前列表全选/全不选">
+              {filtered.every(p=>hiddenIds.has(p.id))?'✓ 全选显示':'— 全部隐藏'}
+            </button>
+          </div>
+
+          <div className="person-list">
+            {filtered.length===0 && (
+              <div style={{padding:'16px 10px',fontSize:'12px',color:'var(--muted)',textAlign:'center'}}>
+                {search?'无匹配人员':'暂无人员'}
+              </div>
+            )}
+            {filtered.map(p => {
+              const h = sidebarHours(p.id);
+              const isHidden = hiddenIds.has(p.id);
+              return (
+                <div key={p.id} className={`person-item${isHidden?' hidden-row':''}`}>
+                  <input type="checkbox" className="pcheck"
+                    checked={!isHidden} onChange={()=>toggleHidden(p.id)}
+                    title={isHidden?'点击显示（从表格中隐藏）':'点击隐藏（从表格中移除）'}/>
+                  <span className="pname" style={{cursor:'pointer'}} onClick={()=>toggleHidden(p.id)}>{p.name}</span>
+                  <span className="phours">{h>0?`${h.toFixed(1)}h`:'-'}</span>
+                  <span className="pdel" onClick={()=>removePerson(p.id)}>✕</span>
+                </div>
+              );
+            })}
+            {search && hiddenIds.size>0 && (
+              <div style={{padding:'6px 10px',fontSize:'10px',color:'var(--muted)',borderTop:'1px solid var(--border)',marginTop:'4px'}}>
+                搜索模式下表格显示全部匹配结果（忽略隐藏状态）
+              </div>
+            )}
+          </div>
+          <div className="sidebar-foot">
+            <div>共 {personnel.length} 人
+              {search ? ` · 搜索 ${filtered.length} 人` : ''}
+              {!search && hiddenIds.size>0 && !autoHide ? ` · 显示 ${filtered.length-[...hiddenIds].filter(id=>filtered.some(p=>p.id===id)).length}` : ''}
+            </div>
+            <div>类型 {types.length} 种 · 记录 {Object.keys(records).length} 天</div>
+            {/* Template status */}
+            {template ? (
+              <div style={{display:'flex',alignItems:'center',gap:'4px',marginTop:'4px',
+                padding:'4px 6px',background:'var(--yellow)15',borderRadius:'var(--radius)',
+                border:'1px solid var(--yellow)33',fontSize:'11px'}}>
+                <span style={{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+                  color:'var(--yellow)'}} title={template.name}>📋 {template.name}</span>
+                <button className="btn btn-sm" style={{fontSize:'10px',padding:'1px 5px'}}
+                  onClick={()=>setModal('view-tpl')}>查看</button>
+                <button className="btn btn-sm" style={{fontSize:'10px',padding:'1px 5px',
+                  color:'var(--red)',borderColor:'var(--red)'}}
+                  onClick={()=>setTemplate(null)}>清除</button>
+              </div>
+            ) : (
+              <div style={{fontSize:'11px',color:'var(--border)',marginTop:'2px'}}>无缓存模板</div>
+            )}
+            <div className="sidebar-foot-actions" style={{marginTop:'6px'}}>
+              <button className="btn btn-sm" style={{flex:1,fontSize:'11px'}} onClick={()=>setModal('people')}>+ 人员</button>
+              <button className="btn btn-sm btn-danger" style={{fontSize:'11px'}} onClick={clearAll}
+                title="清空所有工时记录（保留人员和类型）">清空记录</button>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Main ── */}
+        <div className="main">
+          {/* Types summary bar */}
+          <div className="info-bar">
+            {view==='day' && (<>
+              <span className="info-item">📅 <span className="info-val">{curStr}</span></span>
+              <span className="info-item">上工人数: <span className="info-val">
+                {tablePersonnel.filter(p=>dayHours(curStr,p.id)>0).length}/{tablePersonnel.length}
+              </span></span>
+              <span className="info-item">当日总工时: <span className="info-val" style={{color:'var(--yellow)'}}>
+                {tablePersonnel.reduce((s,p)=>s+dayHours(curStr,p.id),0).toFixed(1)} h
+              </span></span>
+            </>)}
+            {view==='week' && (<>
+              <span className="info-item">🗓 本周上工人次</span>
+              <span className="info-item">总工时: <span className="info-val" style={{color:'var(--yellow)'}}>
+                {tablePersonnel.reduce((s,p)=>s+weekHours(p.id),0).toFixed(1)} h
+              </span></span>
+            </>)}
+            <span style={{marginLeft:'auto',display:'flex',gap:'6px',flexWrap:'wrap',alignItems:'center'}}>
+              {template && (
+                <button
+                  className={`btn btn-sm${showDiff?' diff-active-btn':''}`}
+                  onClick={()=>setShowDiff(v=>!v)}
+                  title={showDiff?'关闭差异对比':'与缓存模板对比差异'}>
+                  ⚡ {showDiff?'关闭差异':'显示差异'}
+                </button>
+              )}
+              {types.map(t=>(
+                <span key={t.id} className="badge" style={{color:t.color,borderColor:t.color,background:t.color+'22'}}>
+                  {t.name} {t.hours}h
+                </span>
+              ))}
+            </span>
+          </div>
+
+          {view==='day'
+            ? <DayView personnel={diffPersonnel} types={types} dateStr={curStr}
+                getCount={getCount} update={update} dayHours={dayHours}
+                showDiff={showDiff} getTplCount={getTplCount} curDate={curDate}/>
+            : <WeekView personnel={diffPersonnel} types={types} wDates={wDates}
+                dayHours={dayHours} setCurDate={setCurDate} setView={setView}
+                showDiff={showDiff} getTplCount={getTplCount} template={template}/>
+          }
+        </div>
+      </div>
+
+      {/* ── Modals ── */}
+      {modal==='types'      && <TypeModal   types={types}   setTypes={setTypes}   close={()=>setModal(null)}/>}
+      {modal==='people'     && <PeopleModal personnel={personnel} setPersonnel={setPersonnel} close={()=>setModal(null)}/>}
+      {modal==='export'     && <ExportModal onExport={exportExcel} allDates={Object.keys(records).sort()} close={()=>setModal(null)}/>}
+      {modal==='confirm'    && <ConfirmModal msg="确认清空所有记录？此操作不可撤销。" onOk={confirmCb} close={()=>setModal(null)}/>}
+      {modal==='confirm-all'&& <ConfirmModal msg="将清空全部数据：所有工时记录、人员名单（工时类型恢复默认）。此操作不可撤销！" onOk={confirmCb} close={()=>setModal(null)} okLabel="全部清空"/>}
+      {modal==='confirm-tpl'&& <ConfirmModal msg={`将用模板「${template?.name}」覆盖当前${view==='week'?'一周':'一天'}的工时数据，已有记录将被替换。确认？`} onOk={confirmCb} close={()=>setModal(null)} okLabel="应用"/>}
+      {modal==='schedule'   && <ScheduleImportModal personnel={personnel} types={types} onSave={tpl=>{setTemplate(tpl);setModal(null);}} close={()=>setModal(null)}/>}
+      {modal==='view-tpl'   && <TemplateViewModal template={template} types={types} onClear={()=>{setTemplate(null);setModal(null);}} close={()=>setModal(null)}/>}
+    </div>
+  );
+}
+
+/* ═══ Day View ══════════════════════════════════════════════════════════════ */
+function DayView({ personnel, types, dateStr, getCount, update, dayHours, showDiff, getTplCount, curDate }) {
+  if (!personnel.length) return (
+    <div className="empty"><div className="icon">👥</div><p>暂无人员，点击左下角「+ 人员」或「导入人员」</p></div>
+  );
+  if (!types.length) return (
+    <div className="empty"><div className="icon">⚙</div><p>暂无工时类型，请先在「工时类型」中添加</p></div>
+  );
+  const d = curDate ? curDate : new Date(dateStr);
+  const relDay = d.getDay()===0 ? 6 : d.getDay()-1;
+
+  function diffBadge(delta) {
+    if (!showDiff) return null;
+    const cls = delta>0?'pos':delta<0?'neg':'zero';
+    const label = delta>0?`+${delta}`:delta<0?`${delta}`:'=';
+    return <span className={`diff-badge ${cls}`}>{label}</span>;
+  }
+
+  return (
+    <div className={`grid-wrap${showDiff?' diff-on':''}`}>
+      <table className="grid-table">
+        <thead>
+          <tr>
+            <th className="col-name">姓名</th>
+            {types.map(t=>(
+              <th key={t.id} className="th-type" style={{borderTopColor:t.color,minWidth:'130px'}}>
+                <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'2px'}}>
+                  <span style={{color:t.color}}>{t.name}</span>
+                  <span style={{fontSize:'11px',color:'var(--muted)',fontWeight:400}}>{t.hours} h / 次</span>
+                </div>
+              </th>
+            ))}
+            <th className="col-total" style={{minWidth:'75px'}}>合计(h)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {personnel.map(p => {
+            const th = dayHours(dateStr, p.id);
+            return (
+              <tr key={p.id}>
+                <td className="col-name">{p.name}</td>
+                {types.map(t => {
+                  const cnt = getCount(dateStr, p.id, t.id);
+                  const tplCnt = showDiff ? getTplCount(relDay, p.name, t.name) : 0;
+                  const delta = cnt - tplCnt;
+                  return (
+                    <td key={t.id}>
+                      <div className="counter-wrap" style={{position:'relative'}}>
+                        <button className="cbtn minus" disabled={cnt===0}
+                          onClick={()=>update(dateStr,p.id,t.id,-1)}>−</button>
+                        <div>
+                          <div className="cval" style={{color:cnt>0?t.color:'var(--muted)'}}>{cnt}</div>
+                          {cnt>0&&<div className="chours">{(cnt*t.hours).toFixed(1)}h</div>}
+                        </div>
+                        <button className="cbtn plus" onClick={()=>update(dateStr,p.id,t.id,1)}>+</button>
+                        {showDiff && (cnt>0||tplCnt>0) && diffBadge(delta)}
+                      </div>
+                    </td>
+                  );
+                })}
+                <td className="col-total" style={{fontSize:'15px'}}>
+                  {th>0 ? th.toFixed(1) : <span style={{color:'var(--muted)'}}>—</span>}
+                </td>
+              </tr>
+            );
+          })}
+          {/* Totals row */}
+          <tr className="row-total">
+            <td className="col-name">合计</td>
+            {types.map(t=>{
+              const cnt = personnel.reduce((s,p)=>s+getCount(dateStr,p.id,t.id),0);
+              const hrs = cnt * t.hours;
+              return (
+                <td key={t.id} style={{fontFamily:"'SF Mono','Consolas',monospace",fontSize:'12px'}}>
+                  {cnt>0 ? <><span style={{color:t.color}}>{cnt}次</span><span style={{color:'var(--muted)'}}> / {hrs.toFixed(1)}h</span></> : <span style={{color:'var(--muted)'}}>—</span>}
+                </td>
+              );
+            })}
+            <td style={{fontFamily:"'SF Mono','Consolas',monospace",fontSize:'15px',color:'var(--yellow)',fontWeight:700}}>
+              {personnel.reduce((s,p)=>s+dayHours(dateStr,p.id),0).toFixed(1)}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* ═══ Week View ═════════════════════════════════════════════════════════════ */
+function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, showDiff, getTplCount, template }) {
+  if (!personnel.length) return (
+    <div className="empty"><div className="icon">👥</div><p>暂无人员，请先导入</p></div>
+  );
+  const wTotal = (pid) => wDates.reduce((s,d)=>s+dayHours(fmt(d),pid), 0);
+  const colTotal = (d) => personnel.reduce((s,p)=>s+dayHours(fmt(d),p.id), 0);
+  const grandTotal = () => wDates.reduce((s,d)=>s+colTotal(d), 0);
+
+  function goDay(d) { setCurDate(new Date(d)); setView('day'); }
+
+  // template hours for a person on a weekday (sum across all types)
+  function tplDayHours(personName, relDay) {
+    if (!template || !getTplCount) return 0;
+    const dayData = template.data?.[relDay]?.[personName];
+    if (!dayData) return 0;
+    return Object.entries(dayData).reduce((s,[tn,cnt])=>{
+      const t = types.find(t=>t.name===tn);
+      return s + (t ? cnt*t.hours : 0);
+    }, 0);
+  }
+
+  return (
+    <div className={`grid-wrap${showDiff?' diff-on':''}`}>
+      <table className="grid-table">
+        <thead>
+          <tr>
+            <th className="col-name">姓名</th>
+            {wDates.map((d,i)=>(
+              <th key={i} style={{minWidth:'85px',cursor:'pointer'}} onClick={()=>goDay(d)} title="点击查看当日详情">
+                <div className={`wdh${isToday(d)?' is-today':''}`}>
+                  <span className="wd-name">{WD[i]}</span>
+                  <span className="wd-date">{fmtShort(d)}</span>
+                  {isToday(d)&&<span className="today-pill">今</span>}
+                </div>
+              </th>
+            ))}
+            <th className="col-total">合计(h)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {personnel.map(p=>{
+            const wt = wTotal(p.id);
+            return (
+              <tr key={p.id}>
+                <td className="col-name">{p.name}</td>
+                {wDates.map((d,i)=>{
+                  const h = dayHours(fmt(d), p.id);
+                  const relDay = i; // 0=Mon ... 6=Sun
+                  const tplH = showDiff ? tplDayHours(p.name, relDay) : 0;
+                  const deltaH = h - tplH;
+                  const diffCls = deltaH>0?'pos':deltaH<0?'neg':'zero';
+                  const diffLabel = deltaH>0?`+${deltaH.toFixed(1)}`:deltaH<0?deltaH.toFixed(1):'=';
+                  return (
+                    <td key={i} title={`${p.name} ${fmtShort(d)} → 点击录入`}>
+                      <div className="wcell-wrap">
+                        <span className={`wcell${h>0?' has-data':' zero'}`} onClick={()=>goDay(d)}>
+                          {h>0 ? h.toFixed(1)+'h' : '—'}
+                        </span>
+                        {showDiff && (h>0||tplH>0) && (
+                          <span className={`wdiff-badge ${diffCls}`}>{diffLabel}</span>
+                        )}
+                      </div>
+                    </td>
+                  );
+                })}
+                <td className="col-total">{wt>0?wt.toFixed(1):<span style={{color:'var(--muted)'}}>—</span>}</td>
+              </tr>
+            );
+          })}
+          <tr className="row-total">
+            <td className="col-name">合计</td>
+            {wDates.map((d,i)=>{
+              const t = colTotal(d);
+              return (
+                <td key={i} style={{fontFamily:"'SF Mono','Consolas',monospace",fontSize:'13px'}}>
+                  {t>0?<span style={{color:'var(--accent)'}}>{t.toFixed(1)}h</span>:<span style={{color:'var(--muted)'}}>—</span>}
+                </td>
+              );
+            })}
+            <td style={{fontFamily:"'SF Mono','Consolas',monospace",fontWeight:700,color:'var(--yellow)',fontSize:'15px'}}>
+              {grandTotal().toFixed(1)}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div style={{padding:'8px 12px',fontSize:'11px',color:'var(--muted)',borderTop:'1px solid var(--border)'}}>
+        💡 点击日期列头或单元格可跳转到当日详细录入视图
+      </div>
+    </div>
+  );
+}
+
+/* ═══ Work Type Modal ═══════════════════════════════════════════════════════ */
+function TypeModal({ types, setTypes, close }) {
+  const [list, setList] = useState(types.map(t=>({...t})));
+  const [newName, setNewName] = useState('');
+  const [newHrs, setNewHrs]   = useState('');
+  const [newClr, setNewClr]   = useState('#58a6ff');
+
+  function add() {
+    if (!newName.trim()||!newHrs) return;
+    setList(p=>[...p,{id:uid(),name:newName.trim(),hours:parseFloat(newHrs),color:newClr}]);
+    setNewName(''); setNewHrs('');
+  }
+  function del(id) { setList(p=>p.filter(t=>t.id!==id)); }
+  function upd(id,field,val) {
+    setList(p=>p.map(t=>t.id===id?{...t,[field]:field==='hours'?parseFloat(val)||0:val}:t));
+  }
+  function save() { setTypes(list); close(); }
+
+  return (
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&close()}>
+      <div className="modal">
+        <div className="modal-title">⚙ 工时类型管理 <button className="close" onClick={close}>✕</button></div>
+
+        {list.length===0&&<div style={{color:'var(--muted)',fontSize:'13px',marginBottom:'10px'}}>暂无类型</div>}
+
+        {list.map(t=>(
+          <div key={t.id} className="type-item">
+            <div className="color-dot" style={{background:t.color}}/>
+            <input className="inp" value={t.name} onChange={e=>upd(t.id,'name',e.target.value)} style={{flex:1}}/>
+            <input className="inp inp-sm" type="number" min="0.5" step="0.5" value={t.hours}
+              onChange={e=>upd(t.id,'hours',e.target.value)}/>
+            <span style={{fontSize:'12px',color:'var(--muted)'}}>h</span>
+            <input type="color" value={t.color} onChange={e=>upd(t.id,'color',e.target.value)}/>
+            <button className="btn btn-sm btn-danger" onClick={()=>del(t.id)}>删除</button>
+          </div>
+        ))}
+
+        <hr className="divider"/>
+        <div className="tag-section">添加新类型</div>
+        <div className="form-row">
+          <input className="inp" placeholder="名称（如：值班3）" value={newName} onChange={e=>setNewName(e.target.value)}
+            onKeyDown={e=>e.key==='Enter'&&add()}/>
+          <input className="inp inp-sm" type="number" min="0.5" step="0.5" placeholder="小时" value={newHrs}
+            onChange={e=>setNewHrs(e.target.value)}/>
+          <span style={{fontSize:'12px',color:'var(--muted)'}}>h</span>
+          <input type="color" value={newClr} onChange={e=>setNewClr(e.target.value)}/>
+          <button className="btn btn-sm btn-primary" onClick={add}>添加</button>
+        </div>
+
+        <div style={{display:'flex',justifyContent:'flex-end',gap:'8px',marginTop:'16px'}}>
+          <button className="btn" onClick={close}>取消</button>
+          <button className="btn btn-primary" onClick={save}>保存</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ People Modal ══════════════════════════════════════════════════════════ */
+function PeopleModal({ personnel, setPersonnel, close }) {
+  const [text, setText] = useState('');
+  const [mode, setMode] = useState('add');
+  const fileRef = useRef();
+
+  function handleFile(e) {
+    const file=e.target.files[0]; if(!file) return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      try {
+        const wb=XLSX.read(ev.target.result,{type:'binary'});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        const names=rows.map(r=>String(r[0]||'').trim()).filter(n=>n&&n!=='姓名'&&n!=='name');
+        setText(prev=>(prev?prev+'\n':'')+names.join('\n'));
+      } catch { alert('读取失败'); }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value='';
+  }
+
+  function doImport() {
+    const names=[...new Set(text.split(/[\n,，、;；]/).map(s=>s.trim()).filter(Boolean))];
+    if(!names.length) return;
+    const newPpl = names.map(name=>({id:uid(),name}));
+    if (mode==='replace') {
+      setPersonnel(newPpl);
+    } else {
+      const ex=new Set(personnel.map(p=>p.name));
+      setPersonnel(prev=>[...prev,...newPpl.filter(p=>!ex.has(p.name))]);
+    }
+    close();
+  }
+
+  return (
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&close()}>
+      <div className="modal">
+        <div className="modal-title">👥 导入人员名单 <button className="close" onClick={close}>✕</button></div>
+        <div style={{fontSize:'12px',color:'var(--muted)',marginBottom:'10px'}}>
+          每行一个姓名，或用逗号/分号分隔。支持从 Excel/CSV 导入（第一列为姓名）。
+        </div>
+        <textarea className="inp" placeholder={"张三\n李四\n王五\n…"} value={text} onChange={e=>setText(e.target.value)}/>
+
+        <div style={{display:'flex',alignItems:'center',gap:'12px',marginTop:'10px'}}>
+          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{display:'none'}} onChange={handleFile}/>
+          <button className="btn btn-sm" onClick={()=>fileRef.current.click()}>📂 从文件导入</button>
+          <div className="radio-row">
+            <label><input type="radio" value="add" checked={mode==='add'} onChange={()=>setMode('add')}/> 追加</label>
+            <label><input type="radio" value="replace" checked={mode==='replace'} onChange={()=>setMode('replace')}/> 替换全部</label>
+          </div>
+          <div style={{flex:1}}/>
+          <span style={{fontSize:'12px',color:'var(--muted)'}}>{text.split(/[\n,，、;；]/).filter(s=>s.trim()).length} 人</span>
+        </div>
+
+        <div style={{display:'flex',justifyContent:'flex-end',gap:'8px',marginTop:'14px'}}>
+          <button className="btn" onClick={close}>取消</button>
+          <button className="btn btn-primary" onClick={doImport}>导入</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ Export Modal ══════════════════════════════════════════════════════════ */
+function ExportModal({ onExport, allDates, close }) {
+  const [sel, setSel]       = useState('both');
+  const [rangeType, setRangeType] = useState('all'); // 'all' | 'custom'
+  const minDate = allDates[0] || '';
+  const maxDate = allDates[allDates.length-1] || '';
+  const [startDate, setStartDate] = useState(minDate);
+  const [endDate,   setEndDate]   = useState(maxDate);
+
+  const filtered = rangeType==='all' ? allDates
+    : allDates.filter(d=>d>=startDate && d<=endDate);
+
+  function go() {
+    onExport(sel, rangeType==='all'?null:startDate, rangeType==='all'?null:endDate);
+    close();
+  }
+
+  const dateInputStyle = {
+    padding:'5px 8px',borderRadius:'var(--radius)',border:'1px solid var(--border)',
+    background:'var(--bg)',color:'var(--text)',fontSize:'12px',fontFamily:'inherit',outline:'none'
+  };
+
+  return (
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&close()}>
+      <div className="modal" style={{width:400}}>
+        <div className="modal-title">📊 导出 Excel <button className="close" onClick={close}>✕</button></div>
+
+        {/* Content type */}
+        <div className="field">
+          <label>导出内容</label>
+          {[
+            {v:'day',   label:'按日统计',       desc:'每列=一天'},
+            {v:'week',  label:'按周汇总',       desc:'每列=一周'},
+            {v:'both',  label:'日 + 周（推荐）', desc:'含两种统计 + 明细'},
+          ].map(opt=>(
+            <label key={opt.v} style={{display:'flex',alignItems:'center',gap:'8px',
+              padding:'7px 10px',borderRadius:6,cursor:'pointer',
+              background:sel===opt.v?'var(--accent)22':'transparent',
+              border:`1px solid ${sel===opt.v?'var(--accent)':'var(--border)'}`,
+              marginBottom:'6px',fontSize:'13px'}}>
+              <input type="radio" value={opt.v} checked={sel===opt.v} onChange={()=>setSel(opt.v)}/>
+              <div>
+                <div style={{fontWeight:600,color:sel===opt.v?'var(--accent)':'var(--text)'}}>{opt.label}</div>
+                <div style={{fontSize:'11px',color:'var(--muted)'}}>{opt.desc}</div>
+              </div>
+            </label>
+          ))}
+        </div>
+
+        <hr className="divider"/>
+
+        {/* Date range */}
+        <div className="field">
+          <label>时间范围</label>
+          <div className="radio-row" style={{marginBottom:'10px'}}>
+            <label><input type="radio" checked={rangeType==='all'} onChange={()=>setRangeType('all')}/> 全部记录（{allDates.length} 天）</label>
+            <label><input type="radio" checked={rangeType==='custom'} onChange={()=>setRangeType('custom')}/> 自定义范围</label>
+          </div>
+          {rangeType==='custom' && (
+            <div style={{display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap'}}>
+              <input type="date" value={startDate} min={minDate} max={endDate||maxDate}
+                onChange={e=>setStartDate(e.target.value)} style={dateInputStyle}/>
+              <span style={{color:'var(--muted)',fontSize:'12px'}}>至</span>
+              <input type="date" value={endDate} min={startDate||minDate} max={maxDate}
+                onChange={e=>setEndDate(e.target.value)} style={dateInputStyle}/>
+              <span style={{fontSize:'11px',color:'var(--muted)'}}>共 {filtered.length} 天</span>
+            </div>
+          )}
+          {rangeType==='custom' && filtered.length===0 && (
+            <div style={{fontSize:'11px',color:'var(--red)',marginTop:'5px'}}>⚠ 所选范围内无记录</div>
+          )}
+        </div>
+
+        <div style={{fontSize:'11px',color:'var(--muted)',marginBottom:'14px'}}>
+          导出文件包含「工时明细」表可重新导入
+        </div>
+        <div style={{display:'flex',justifyContent:'flex-end',gap:'8px'}}>
+          <button className="btn" onClick={close}>取消</button>
+          <button className="btn btn-primary" disabled={rangeType==='custom'&&filtered.length===0} onClick={go}>导出</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ Template View Modal ══════════════════════════════════════════════════ */
+function TemplateViewModal({ template, types, onClear, close }) {
+  if (!template) return null;
+  const WD = ['周一','周二','周三','周四','周五','周六','周日'];
+  // Collect all person names across all days
+  const allNames = [...new Set(
+    Object.values(template.data).flatMap(d=>Object.keys(d))
+  )].sort();
+  const totalEntries = Object.values(template.data).reduce((s,d)=>
+    s+Object.values(d).reduce((ss,tt)=>ss+Object.values(tt).reduce((n,v)=>n+v,0),0),0);
+
+  return (
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&close()}>
+      <div className="modal" style={{width:680,maxHeight:'85vh',overflow:'hidden',display:'flex',flexDirection:'column'}}>
+        <div className="modal-title">
+          📋 模板预览 — <span style={{color:'var(--yellow)'}}>{template.name}</span>
+          <button className="close" onClick={close}>✕</button>
+        </div>
+        <div style={{fontSize:'12px',color:'var(--muted)',marginBottom:'10px'}}>
+          共 <strong style={{color:'var(--text)'}}>{allNames.length}</strong> 人 ·
+          <strong style={{color:'var(--accent)'}}> {totalEntries}</strong> 条记录 ·
+          覆盖 <strong style={{color:'var(--text)'}}>{Object.keys(template.data).length}</strong> 个星期
+        </div>
+        <div style={{flex:1,overflowY:'auto'}}>
+          <div className="sched-table-wrap" style={{maxHeight:'none'}}>
+            <table className="sched-table">
+              <thead>
+                <tr>
+                  <th style={{minWidth:60,position:'sticky',left:0,zIndex:2}}>姓名</th>
+                  {[0,1,2,3,4,5,6].map(d=><th key={d}>{WD[d]}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {allNames.map(name=>(
+                  <tr key={name}>
+                    <td style={{fontWeight:600,position:'sticky',left:0,background:'var(--surface)',zIndex:1}}>{name}</td>
+                    {[0,1,2,3,4,5,6].map(wd=>{
+                      const dayData = template.data[wd]?.[name];
+                      return (
+                        <td key={wd} style={{fontSize:'11px'}}>
+                          {dayData
+                            ? Object.entries(dayData).map(([tn,cnt])=>{
+                                const t = types.find(t=>t.name===tn);
+                                return <div key={tn} style={{color:t?.color||'var(--text)'}}>{tn}×{cnt}</div>;
+                              })
+                            : <span style={{color:'var(--border)'}}>—</span>
+                          }
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div style={{display:'flex',gap:'8px',marginTop:'14px'}}>
+          <button className="btn btn-danger" onClick={onClear}>清除模板</button>
+          <div style={{flex:1}}/>
+          <button className="btn btn-primary" onClick={close}>关闭</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ Calendar Picker ══════════════════════════════════════════════════════ */
+function CalendarPicker({ curDate, setCurDate, view, records, dateLabel, isHighlight }) {
+  const [open, setOpen] = useState(false);
+  const [panelMode, setPanelMode] = useState('day'); // 'day' | 'month' | 'year'
+  const [panelDate, setPanelDate] = useState(() => new Date(curDate));
+  const ref = useRef();
+
+  // Sync panel when curDate changes externally
+  useEffect(() => { setPanelDate(new Date(curDate)); }, [curDate.toDateString()]);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const todayStr = fmt(new Date());
+  const curStr   = fmt(curDate);
+
+  // Dates that have any record
+  const datesToDots = useMemo(() => new Set(Object.keys(records)), [records]);
+
+  // Which dates are in curDate's week (for week view highlighting)
+  const weekSet = useMemo(() => {
+    if (view !== 'week') return new Set();
+    const mon = getMonday(curDate);
+    return new Set(Array.from({length:7},(_,i)=>fmt(addDays(mon,i))));
+  }, [view, curDate]);
+
+  /* ── Panel navigation ── */
+  function prevPanel() {
+    setPanelDate(d => {
+      const r = new Date(d);
+      if (panelMode==='day')   { r.setMonth(r.getMonth()-1); }
+      else if (panelMode==='month') { r.setFullYear(r.getFullYear()-1); }
+      else { r.setFullYear(r.getFullYear()-12); }
+      return r;
+    });
+  }
+  function nextPanel() {
+    setPanelDate(d => {
+      const r = new Date(d);
+      if (panelMode==='day')   { r.setMonth(r.getMonth()+1); }
+      else if (panelMode==='month') { r.setFullYear(r.getFullYear()+1); }
+      else { r.setFullYear(r.getFullYear()+12); }
+      return r;
+    });
+  }
+
+  function selectDay(d) {
+    setCurDate(new Date(d));
+    setOpen(false);
+    setPanelMode('day');
+  }
+  function selectMonth(m) {
+    setPanelDate(d => { const r=new Date(d); r.setMonth(m); return r; });
+    setPanelMode('day');
+  }
+  function selectYear(y) {
+    setPanelDate(d => { const r=new Date(d); r.setFullYear(y); return r; });
+    setPanelMode('month');
+  }
+
+  /* ── Build day grid ── */
+  function buildDayGrid() {
+    const year = panelDate.getFullYear();
+    const month = panelDate.getMonth();
+    const first = new Date(year, month, 1);
+    const startDow = first.getDay(); // 0=Sun
+    // Start from Monday
+    const startOffset = startDow === 0 ? 6 : startDow - 1;
+    const cells = [];
+    for (let i = 0; i < startOffset; i++) {
+      cells.push({ d: addDays(first, -startOffset+i), otherMonth: true });
+    }
+    const daysInMonth = new Date(year, month+1, 0).getDate();
+    for (let i = 1; i <= daysInMonth; i++) {
+      cells.push({ d: new Date(year, month, i), otherMonth: false });
+    }
+    // pad to complete last row
+    while (cells.length % 7 !== 0) {
+      cells.push({ d: addDays(cells[cells.length-1].d, 1), otherMonth: true });
+    }
+    return cells;
+  }
+
+  const panelTitle = useMemo(() => {
+    if (panelMode==='day') return `${panelDate.getFullYear()}年 ${panelDate.getMonth()+1}月`;
+    if (panelMode==='month') return `${panelDate.getFullYear()}年`;
+    const base = Math.floor(panelDate.getFullYear()/12)*12;
+    return `${base} — ${base+11}`;
+  }, [panelMode, panelDate]);
+
+  const yearBase = Math.floor(panelDate.getFullYear()/12)*12;
+
+  const WDS = ['一','二','三','四','五','六','日'];
+  const MONTHS = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+
+  return (
+    <div className="cal-anchor" ref={ref}>
+      <span
+        className={`date-label${isHighlight?' today-indicator':''}`}
+        style={{cursor:'pointer',userSelect:'none',borderRadius:6,padding:'2px 8px',
+          transition:'background .12s', background: open ? 'var(--surface2)' : 'transparent'}}
+        onClick={()=>setOpen(o=>!o)}
+        title="点击打开日历"
+      >{dateLabel} 📅</span>
+
+      {open && (
+        <div className="cal-popup">
+          {/* Header */}
+          <div className="cal-head">
+            <span className="cal-nav" onClick={prevPanel}>‹</span>
+            <span className="cal-title" onClick={()=>setPanelMode(m=>m==='day'?'month':m==='month'?'year':'year')}>
+              {panelTitle}
+            </span>
+            <span className="cal-nav" onClick={nextPanel}>›</span>
+          </div>
+
+          {/* Day grid */}
+          {panelMode==='day' && (<>
+            <div className="cal-grid">
+              {WDS.map(w=><div key={w} className="cal-wd">{w}</div>)}
+              {buildDayGrid().map((cell,i)=>{
+                const ds = fmt(cell.d);
+                const isSel = view==='day' ? ds===curStr : weekSet.has(ds);
+                const isWkStart = view==='week' && weekSet.has(ds) && cell.d.getDay()===(getMonday(curDate).getDay());
+                const isWkEnd   = view==='week' && weekSet.has(ds) && cell.d.getDay()===0;
+                let cls = 'cal-day';
+                if (cell.otherMonth) cls+=' other-month';
+                if (ds===todayStr) cls+=' is-today';
+                if (view==='day' && ds===curStr) cls+=' selected';
+                if (view==='week' && weekSet.has(ds) && !cell.otherMonth) cls+=' in-week';
+                if (datesToDots.has(ds) && !cell.otherMonth) cls+=' has-data';
+                return (
+                  <div key={i} className={cls}
+                    onClick={()=>!cell.otherMonth && selectDay(cell.d)}>
+                    {cell.d.getDate()}
+                  </div>
+                );
+              })}
+            </div>
+          </>)}
+
+          {/* Month grid */}
+          {panelMode==='month' && (
+            <div className="cal-month-grid">
+              {MONTHS.map((m,i)=>(
+                <div key={i} className={`cal-month-item${panelDate.getMonth()===i?' selected':''}`}
+                  onClick={()=>selectMonth(i)}>{m}</div>
+              ))}
+            </div>
+          )}
+
+          {/* Year grid */}
+          {panelMode==='year' && (
+            <div className="cal-year-grid">
+              {Array.from({length:12},(_,i)=>yearBase+i).map(y=>(
+                <div key={y} className={`cal-year-item${panelDate.getFullYear()===y?' selected':''}`}
+                  onClick={()=>selectYear(y)}>{y}</div>
+              ))}
+            </div>
+          )}
+
+          {/* Footer */}
+          <div className="cal-footer">
+            <button className="btn btn-sm" style={{flex:1}} onClick={()=>{
+              const t=new Date(); setPanelDate(t); setPanelMode('day');
+              setCurDate(t); setOpen(false);
+            }}>今天</button>
+            <button className="btn btn-sm" style={{flex:1}} onClick={()=>setOpen(false)}>关闭</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+/* ═══ Schedule Import Modal ═════════════════════════════════════════════════ */
+
+/* ── Pure parsing logic (no React) ── */
+function normStr(s) {
+  if (s == null) return '';
+  return String(s).replace(/：/g,':').replace(/[－—\u2014\u2013]/g,'-').replace(/\s+/g,' ').trim();
+}
+
+function parseTimeMins(label) {
+  const s = normStr(label);
+  const m = s.match(/(\d{1,2}):(\d{2})\s*[-~]\s*(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  let start = parseInt(m[1])*60+parseInt(m[2]);
+  let end   = parseInt(m[3])*60+parseInt(m[4]);
+  if (end <= start) end += 24*60;
+  return end - start;
+}
+
+// Type labels that explicitly map to 1h (shortest type)
+const ONE_HOUR_LABELS = new Set(['负责人','晚上值日','值日','巡视','夜巡','值守']);
+
+function classifyByTypes(label, types) {
+  const s = normStr(label);
+  const shortest = () => [...types].sort((a,b)=>a.hours-b.hours)[0] || null;
+  // Explicit 1h labels (负责人, 晚上值日, etc.)
+  if (ONE_HOUR_LABELS.has(s) || ONE_HOUR_LABELS.has(label)) return shortest();
+  // Type d: pure weekday with no time → 1h
+  if (extractWeekday(s) !== null && !/\d{1,2}:\d{2}/.test(s)) return shortest();
+  // Type a/b/e: contains a time range → match by duration
+  const mins = parseTimeMins(s);
+  if (mins != null && mins > 0) {
+    let best=null, bestDiff=Infinity;
+    for (const t of types) {
+      const d = Math.abs(t.hours - mins/60);
+      if (d < bestDiff) { bestDiff=d; best=t; }
+    }
+    if (best && bestDiff <= 0.65) return best;
+  }
+  // Fallback: keyword contains type name
+  for (const t of [...types].sort((a,b)=>b.hours-a.hours)) {
+    if (s.includes(t.name)) return t;
+  }
+  return shortest();
+}
+
+const WD_MAP_TABLE = [
+  [['星期一','周一'],0],[['星期二','周二'],1],[['星期三','周三'],2],
+  [['星期四','周四'],3],[['星期五','周五'],4],[['星期六','周六'],5],
+  [['星期日','周日','星期天','周天'],6],
+];
+function extractWeekday(s) {
+  if (!s) return null;
+  const n = normStr(s);
+  for (const [keys, wd] of WD_MAP_TABLE) {
+    for (const k of keys) {
+      if (n.startsWith(k) || n === k) return wd;
+    }
+  }
+  return null;
+}
+
+const HEADER_KW_SET = new Set(['签到','楼层','负责人','值班','洗板擦布','洗抹布','洗板']);
+// Match exact set OR anything starting with "洗"（洗抹布/洗板擦布 etc）
+function isHeaderKW(s) {
+  if (!s) return false;
+  return HEADER_KW_SET.has(s) || s.startsWith('洗');
+}
+// Keep HEADER_KW as alias for Set-style usage in isPersonName
+const HEADER_KW = HEADER_KW_SET;
+const SKIP_NAMES = new Set(['无需值日','无需值班','无','时间','综合楼','s1楼','负责人','楼层','值班组','巡视组','周一','周二','周三','周四','周五','周六','周日','周天','星期一','星期二','星期三','星期四','星期五','星期六','星期日','星期天']);
+
+function isPersonName(s) {
+  if (!s) return false;
+  const t = normStr(s).toLowerCase();
+  if (!t) return false;
+  if (SKIP_NAMES.has(t)) return false;
+  if (SKIP_NAMES.has(s)) return false;
+  if (/^\d+$/.test(t)) return false;     // pure number
+  if (t.length > 12) return false;        // too long
+  if (isHeaderKW(s) || [...HEADER_KW].some(kw=>t.includes(kw))) return false;
+  const BAD = ['排班','安排','校历','周末','巡视','综合楼','s1楼','值班组','巡视组'];
+  if (BAD.some(k => t.includes(k))) return false;
+  // Reject time-range strings and pure weekday names
+  if (/\d{1,2}:\d{2}/.test(normStr(s))) return false;
+  const cjk = (s.match(/[\u4e00-\u9fff]/g)||[]).length;
+  return cjk >= 1;
+}
+
+function buildGrid(ws) {
+  // Expand merged cells; returns getCellFn(row0, col0) → string|null (0-indexed)
+  const mergeVals = {};
+  for (const m of (ws['!merges']||[])) {
+    const topLeft = ws[XLSX.utils.encode_cell({r:m.s.r, c:m.s.c})];
+    const val = topLeft?.v != null ? normStr(String(topLeft.v)) : null;
+    for (let r=m.s.r; r<=m.e.r; r++)
+      for (let cc=m.s.c; cc<=m.e.c; cc++)
+        mergeVals[`${r},${cc}`] = val;
+  }
+  return function(r, cc) {
+    const key = `${r},${cc}`;
+    if (key in mergeVals) return mergeVals[key] || null;
+    const cell = ws[XLSX.utils.encode_cell({r, c:cc})];
+    return cell?.v != null ? normStr(String(cell.v)) : null;
+  };
+}
+
+function getSheetDims(ws) {
+  const ref = ws['!ref'];
+  if (!ref) return {maxR:0, maxC:0};
+  const rng = XLSX.utils.decode_range(ref);
+  return {maxR: rng.e.r, maxC: rng.e.c};
+}
+
+function parseScheduleSheetNew(ws, types, personnel, extraRules) {
+  const G = buildGrid(ws);
+  const {maxR, maxC} = getSheetDims(ws);
+
+  function tryMatch(rawName) {
+    if (!rawName) return null;
+    const check = (name) => {
+      let p = personnel.find(p => p.name === name);
+      if (p) return p;
+      const part = name.split(/[·•]/)[0].trim();
+      p = personnel.find(p => p.name === part || p.name.startsWith(part) || part.startsWith(p.name));
+      if (p) return p;
+      if (part.length >= 2) p = personnel.find(p => p.name.includes(part) || part.includes(p.name));
+      return p || null;
+    };
+    if (extraRules[rawName]) return check(extraRules[rawName]);
+    return check(rawName);
+  }
+
+  // Safe read: falls back left up to 2 cells for non-topleft merged cells
+  function Gsafe(r, cc) {
+    const v = G(r, cc);
+    if (v != null) return v;
+    if (cc > 0) { const v1 = G(r, cc-1); if (v1 != null) return v1; }
+    if (cc > 1) { const v2 = G(r, cc-2); if (v2 != null) return v2; }
+    return null;
+  }
+
+  // Normalize typeCol to the merge top-left in the header row
+  function normTypeCol(hr, col) {
+    const val = G(hr, col);
+    if (!val) return col;
+    let left = col;
+    while (left > 0 && G(hr, left-1) === val) left--;
+    return left;
+  }
+
+  // ── 1. Find 签到 header rows ──────────────────────────────────────────
+  const signRowSet = new Set();
+  for (let r=0; r<=maxR; r++)
+    for (let cc=0; cc<=maxC; cc++)
+      if (G(r,cc) === '签到') signRowSet.add(r);
+  const signRows = [...signRowSet].sort((a,b)=>a-b);
+  if (signRows.length === 0) return {error:'未找到包含「签到」的表头行'};
+
+  const result = {};
+  const unmatchedSet = new Set();
+  const signRowsExt = [...signRows, maxR+1];
+
+  for (let si=0; si<signRows.length; si++) {
+    const hr        = signRows[si];
+    const dataStart = hr + 1;
+    const dataEnd   = signRowsExt[si+1] - 2;
+    if (dataStart > dataEnd) continue;
+
+    // ── 2a. Deduplicate sign_cols: keep first of each consecutive run ──
+    const rawSC = [];
+    for (let cc=0; cc<=maxC; cc++)
+      if (G(hr,cc) === '签到') rawSC.push(cc);
+    const signCols = [];
+    let runEnd = -2;
+    for (const cc of rawSC) {
+      if (cc > runEnd+1) signCols.push(cc);
+      runEnd = cc;
+    }
+
+    // ── 2b. Build groups ──────────────────────────────────────────────
+    const groups = [];
+    for (const sc of signCols) {
+      let foundWd = null, foundWdCol = -1;
+      // Scan left from sign col to find weekday header
+      for (let cc=sc-1; cc>=0; cc--) {
+        const cv = G(hr, cc);
+        if (!cv) continue;
+        if (isHeaderKW(cv)) continue;
+        const wd = extractWeekday(cv);
+        if (wd !== null) { foundWd=wd; foundWdCol=cc; break; }
+        if (cv === '时间') continue;
+        break;
+      }
+
+      let pcols;
+      if (foundWdCol >= 0) {
+        // Standard weekday-column block: extend left through merged header
+        const wdVal = G(hr, foundWdCol);
+        let leftBound = foundWdCol;
+        while (leftBound > 0 && G(hr, leftBound-1) === wdVal) leftBound--;
+        pcols = [];
+        for (let cc=leftBound; cc<sc; cc++) pcols.push(cc);
+      } else {
+        // Section-3 style: date/type lives in the data cell itself (e.g. 周一, 周六7:30-9:30)
+        // Find typeCol = rightmost '时间' to the left, skipping all separator keywords
+        let typeColR = 0;
+        for (let cc=sc-1; cc>=0; cc--) {
+          const cv = G(hr, cc);
+          if (!cv) continue;
+          if (cv === '时间') { typeColR = cc; break; }
+          if (isHeaderKW(cv)) continue;
+          if (extractWeekday(cv) !== null) { typeColR = cc; break; }
+          typeColR = cc; break;
+        }
+        pcols = [];
+        for (let cc=typeColR+1; cc<sc; cc++) pcols.push(cc);
+      }
+
+      // typeCol: scan left from first pcol to find '时间' source column,
+      // then normalize to the merge top-left so data-row lookups hit the actual cell
+      let typeCol = 0;
+      if (pcols.length > 0) {
+        const firstP = pcols[0];
+        for (let cc=firstP-1; cc>=0; cc--) {
+          const cv = G(hr, cc);
+          if (!cv) continue;
+          if (cv === '时间') { typeCol = normTypeCol(hr, cc); break; }
+          if (isHeaderKW(cv)) continue;
+          if (extractWeekday(cv) !== null) continue;
+          typeCol = normTypeCol(hr, cc); break;
+        }
+      }
+
+      groups.push({wd: foundWd, pcols, typeCol, sc});
+    }
+
+    // ── 2c. Process data rows ─────────────────────────────────────────
+    for (let r=dataStart; r<=dataEnd; r++) {
+      for (const grp of groups) {
+        const typeRaw = Gsafe(r, grp.typeCol);
+        if (!typeRaw) continue;
+        const typeNorm = normStr(typeRaw);
+
+        let wd = grp.wd;
+        if (wd === null) wd = extractWeekday(typeRaw);
+        if (wd === null) continue;
+
+        const wt = classifyByTypes(typeNorm, types);
+        if (!wt) continue;
+
+        const seen = new Set();
+        for (const cc of grp.pcols) {
+          const nm = G(r, cc);
+          if (!nm || seen.has(nm) || !isPersonName(nm)) continue;
+          seen.add(nm);
+          const pObj = tryMatch(nm);
+          if (pObj) {
+            result[wd] = result[wd]||{};
+            result[wd][pObj.name] = result[wd][pObj.name]||{};
+            result[wd][pObj.name][wt.name] = (result[wd][pObj.name][wt.name]||0)+1;
+          } else {
+            unmatchedSet.add(nm);
+          }
+        }
+      }
+    }
+  }
+
+  return {result, unmatched:[...unmatchedSet]};
+}
+
+/* ── PreviewTabs: summary + raw grid view ── */
+function PreviewTabs({ parseResult, personnel, types, WD_LABELS }) {
+  const [tab, setTab] = useState('summary'); // 'summary' | 'raw'
+  const cellMatchType = parseResult.cellMatchType || {};
+
+  // ── Legend colors
+  const CELL_COLORS = {
+    matched:   {bg:'var(--green)33',  color:'var(--green)',  border:'var(--green)66',  label:'已匹配人员'},
+    unmatched: {bg:'var(--yellow)22', color:'var(--yellow)', border:'var(--yellow)66', label:'未匹配人员'},
+    type:      {bg:'var(--accent)22', color:'var(--accent)', border:'var(--accent)55', label:'工时类型'},
+  };
+
+  // ── Raw grid renderer ───────────────────────────────────────────────────
+  function RawGrid() {
+    if (!parseResult.rawGrid) return <div style={{color:'var(--muted)',fontSize:'12px',padding:'20px',textAlign:'center'}}>原始表格数据不可用</div>;
+
+    const grid = parseResult.rawGrid;
+    // Trim trailing empty rows/cols for display
+    let maxR = 0, maxC = 0;
+    for (let r=0; r<grid.length; r++) {
+      for (let cc=0; cc<grid[r].length; cc++) {
+        if (grid[r][cc].val) { maxR = Math.max(maxR, r); maxC = Math.max(maxC, cc); }
+      }
+    }
+    // Add a small buffer
+    maxR = Math.min(maxR + 1, grid.length - 1);
+    maxC = Math.min(maxC + 1, (grid[0]?.length || 1) - 1);
+
+    const HEADER_KW_VALS = new Set(['签到','楼层','负责人','值班','洗板擦布','洗抹布','洗板','时间']);
+
+    function cellStyle(r, cc) {
+      const key = `${r},${cc}`;
+      const mt = cellMatchType[key];
+      if (mt && CELL_COLORS[mt]) {
+        const col = CELL_COLORS[mt];
+        return {background:col.bg, color:col.color, border:`1px solid ${col.border}`, fontWeight:600};
+      }
+      const val = grid[r]?.[cc]?.val;
+      if (!val) return {};
+      if (HEADER_KW_VALS.has(val)) return {background:'var(--surface2)',color:'var(--muted)',fontStyle:'italic'};
+      return {};
+    }
+
+    return (
+      <div className="raw-grid-wrap">
+        <table className="raw-grid">
+          <thead>
+            <tr>
+              <th className="row-hdr">#</th>
+              {Array.from({length:maxC+1},(_,i)=>(
+                <th key={i}>{String.fromCharCode(65+i)}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({length:maxR+1},(_,r)=>(
+              <tr key={r}>
+                <td className="row-hdr">{r+1}</td>
+                {Array.from({length:maxC+1},(_,cc)=>{
+                  const val = grid[r]?.[cc]?.val;
+                  const st = cellStyle(r, cc);
+                  return (
+                    <td key={cc} style={st} title={val||''}>
+                      {val ? (val.length>10 ? val.slice(0,9)+'…' : val) : ''}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  // ── Summary table ──────────────────────────────────────────────────────
+  function SummaryTable() {
+    const matchedPersonnel = personnel.filter(p=>
+      Object.values(parseResult.result).some(d=>d[p.name])
+    );
+    return (
+      <div className="sched-table-wrap">
+        <table className="sched-table">
+          <thead>
+            <tr>
+              <th style={{minWidth:60}}>姓名</th>
+              {WD_LABELS.map(w=><th key={w}>{w}</th>)}
+              <th>合计</th>
+            </tr>
+          </thead>
+          <tbody>
+            {matchedPersonnel.map(p=>{
+              let tot = 0;
+              return (
+                <tr key={p.id}>
+                  <td style={{fontWeight:600}}>{p.name}</td>
+                  {[0,1,2,3,4,5,6].map(wd=>{
+                    const pDay = parseResult.result[wd]?.[p.name];
+                    if (!pDay) return <td key={wd} style={{color:'var(--border)'}}>—</td>;
+                    const entries = Object.entries(pDay);
+                    entries.forEach(([,cnt])=>{ tot+=cnt; });
+                    return (
+                      <td key={wd} style={{fontSize:'11px'}}>
+                        {entries.map(([tn,cnt])=>{
+                          const t = types.find(t=>t.name===tn);
+                          return <div key={tn} style={{color:t?.color}}>{tn}×{cnt}</div>;
+                        })}
+                      </td>
+                    );
+                  })}
+                  <td style={{fontFamily:'monospace',color:'var(--accent)',fontWeight:700}}>{tot}</td>
+                </tr>
+              );
+            })}
+            {matchedPersonnel.length===0 && (
+              <tr><td colSpan={9} style={{textAlign:'center',color:'var(--muted)',padding:'16px'}}>暂无匹配人员</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Tab switcher */}
+      <div className="preview-tabs">
+        <button className={`preview-tab${tab==='summary'?' active':''}`} onClick={()=>setTab('summary')}>
+          📊 汇总（人员×星期）
+        </button>
+        <button className={`preview-tab${tab==='raw'?' active':''}`} onClick={()=>setTab('raw')}>
+          🗂 原始表格（高亮识别区域）
+        </button>
+      </div>
+
+      {/* Legend (raw view only) */}
+      {tab==='raw' && (
+        <div style={{display:'flex',gap:'10px',marginBottom:'6px',flexWrap:'wrap',fontSize:'11px',alignItems:'center'}}>
+          {Object.entries(CELL_COLORS).map(([k,v])=>(
+            <span key={k} style={{display:'inline-flex',alignItems:'center',gap:'4px'}}>
+              <span style={{width:12,height:12,borderRadius:2,background:v.bg,border:`1px solid ${v.border}`,display:'inline-block'}}/>
+              {v.label}
+            </span>
+          ))}
+          <span style={{color:'var(--muted)',marginLeft:'auto'}}>列 A-Z，行号对应 Excel 行</span>
+        </div>
+      )}
+
+      {tab==='summary' ? <SummaryTable/> : <RawGrid/>}
+    </div>
+  );
+}
+
+/* ── React Component ── */
+function ScheduleImportModal({ personnel, types, onSave, close }) {
+  const [step, setStep]               = useState(1);
+  const [fileName, setFileName]       = useState('');
+  const [ws, setWs]                   = useState(null);
+  const [parseResult, setParseResult] = useState(null);
+  const [extraRules, setExtraRules]   = useState({});
+  const [editData, setEditData]       = useState(null); // editable copy of result
+  const [tplName, setTplName]         = useState('');
+  // New person row form
+  const [newPerson, setNewPerson]     = useState('');
+  const [newWd, setNewWd]             = useState(0);
+  const [newType, setNewType]         = useState('');
+  const [newCnt, setNewCnt]           = useState(1);
+  const fileRef = useRef();
+  const WD_LABELS = ['周一','周二','周三','周四','周五','周六','周日'];
+
+  function handleFile(e) {
+    const file = e.target.files[0]; if (!file) return;
+    setFileName(file.name);
+    setTplName(file.name.replace(/\.[^.]+$/,''));
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const wb = XLSX.read(ev.target.result, {type:'binary'});
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        setWs(sheet);
+        const res = parseScheduleSheetNew(sheet, types, personnel, {});
+        setParseResult(res);
+        if (!res.error) {
+          setEditData(JSON.parse(JSON.stringify(res.result)));
+          setStep(res.unmatched.length > 0 ? 2 : 3);
+        }
+      } catch(err) { setParseResult({error:'读取失败：'+err.message}); }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = '';
+  }
+
+  function setRule(raw, val) {
+    const nr = {...extraRules, [raw]: val};
+    setExtraRules(nr);
+    if (ws) {
+      const res = parseScheduleSheetNew(ws, types, personnel, nr);
+      setParseResult(res);
+      if (!res.error) {
+        setEditData(JSON.parse(JSON.stringify(res.result)));
+        if (res.unmatched.length === 0) setStep(3);
+      }
+    }
+  }
+
+  // ── Edit helpers ──────────────────────────────────────────────────────
+  function setCount(wd, personName, typeName, cnt) {
+    setEditData(prev => {
+      const d = JSON.parse(JSON.stringify(prev));
+      if (cnt <= 0) {
+        if (d[wd]?.[personName]) {
+          delete d[wd][personName][typeName];
+          if (!Object.keys(d[wd][personName]).length) delete d[wd][personName];
+          if (!Object.keys(d[wd]||{}).length) delete d[wd];
+        }
+      } else {
+        d[wd] = d[wd]||{}; d[wd][personName] = d[wd][personName]||{};
+        d[wd][personName][typeName] = cnt;
+      }
+      return d;
+    });
+  }
+
+  function addEntry(wd, personName, typeName, cnt) {
+    if (!personName || !typeName || cnt<=0) return;
+    setCount(wd, personName, typeName, cnt);
+  }
+
+  function addNewRow() {
+    const pname = newPerson || (personnel[0]?.name);
+    const tname = newType || (types[0]?.name);
+    if (!pname || !tname || newCnt<=0) return;
+    addEntry(newWd, pname, tname, newCnt);
+  }
+
+  function deleteEntry(wd, personName, typeName) {
+    setCount(wd, personName, typeName, 0);
+  }
+
+  function addTypeToCell(wd, personName) {
+    const tname = types[0]?.name;
+    if (!tname) return;
+    setCount(wd, personName, tname, 1);
+  }
+
+  // ── Computed ──────────────────────────────────────────────────────────
+  const totalCount = editData
+    ? Object.values(editData).reduce((s,d)=>s+Object.values(d).reduce((ss,tt)=>ss+Object.values(tt).reduce((n,v)=>n+v,0),0),0)
+    : 0;
+
+  // All person names present in editData
+  const editPersons = editData
+    ? [...new Set(Object.values(editData).flatMap(d=>Object.keys(d)))].sort()
+    : [];
+
+  function doSave() {
+    if (!editData) return;
+    onSave({name: tplName || '排班模板', data: editData});
+  }
+
+  return (
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&close()}>
+      <div className="modal" style={{width:760,maxHeight:'92vh',overflow:'hidden',display:'flex',flexDirection:'column',padding:'18px'}}>
+        <div className="modal-title" style={{marginBottom:10}}>
+          📅 排班表 → 周模板
+          <span style={{fontSize:'11px',color:'var(--muted)',fontWeight:400,marginLeft:8}}>可手动编辑后保存</span>
+          <button className="close" onClick={close}>✕</button>
+        </div>
+
+        <div className="step-tabs">
+          {[['1','上传文件'],['2','名称映射'],['3','编辑 & 确认']].map(([n,label],i)=>(
+            <button key={n} className={`step-tab${step===i+1?' active':step>i+1?' done':''}`}
+              onClick={()=>step>i+1&&setStep(i+1)}>{n}. {label}</button>
+          ))}
+        </div>
+
+        <div style={{flex:1,overflowY:'auto'}}>
+
+        {/* ── Step 1 ── */}
+        {step===1 && (
+          <div>
+            <div style={{fontSize:'12px',color:'var(--muted)',marginBottom:'12px',lineHeight:1.8,
+              background:'var(--surface2)',borderRadius:6,padding:'10px 12px'}}>
+              <strong style={{color:'var(--text)'}}>支持格式：</strong>
+              时间段（<code>7:05-9:35</code>）、类型+时段（<code>晚巡21:00-22:00</code>）、
+              日期+时段（<code>周六7:30-9:30</code>）、日期（<code>周一</code>）、
+              类型（<code>晚上值日</code>、<code>负责人</code>）均自动匹配工时类型
+            </div>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleFile}/>
+            <div style={{display:'flex',gap:'10px',alignItems:'center'}}>
+              <button className="btn btn-primary" onClick={()=>fileRef.current.click()}>📂 选择排班 Excel</button>
+              {fileName && <span style={{fontSize:'12px',color:'var(--muted)'}}>{fileName}</span>}
+            </div>
+            {parseResult?.error && (
+              <div style={{marginTop:'12px',padding:'10px',background:'var(--red)1a',
+                border:'1px solid var(--red)',borderRadius:6,fontSize:'12px',color:'var(--red)'}}>
+                ⚠ {parseResult.error}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Step 2 ── */}
+        {step===2 && parseResult && !parseResult.error && (
+          <div>
+            <div style={{fontSize:'12px',color:'var(--yellow)',marginBottom:'12px',padding:'8px 12px',
+              background:'var(--yellow)1a',borderRadius:6,border:'1px solid var(--yellow)'}}>
+              ⚠ <strong>{parseResult.unmatched.length}</strong> 个姓名未能自动匹配，请手动指定（留空则跳过）
+            </div>
+            {parseResult.unmatched.map(raw=>(
+              <div key={raw} className="rule-row">
+                <code style={{fontSize:'12px',padding:'3px 8px',background:'var(--surface2)',
+                  borderRadius:4,minWidth:'80px',color:'var(--red)'}}>{raw}</code>
+                <span className="arr">→</span>
+                <select className="rule-sel" value={extraRules[raw]||''} onChange={e=>setRule(raw,e.target.value)}>
+                  <option value="">— 跳过 —</option>
+                  {personnel.map(p=><option key={p.id} value={p.name}>{p.name}</option>)}
+                </select>
+                {extraRules[raw] && <span style={{fontSize:'11px',color:'var(--green)'}}>✓ {extraRules[raw]}</span>}
+              </div>
+            ))}
+            <div style={{marginTop:'14px',display:'flex',gap:'8px'}}>
+              <button className="btn" onClick={()=>setStep(1)}>← 返回</button>
+              <button className="btn btn-primary" onClick={()=>{ setEditData(JSON.parse(JSON.stringify(parseResult.result))); setStep(3); }}>
+                下一步 →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 3: Editable table ── */}
+        {step===3 && editData && (
+          <div>
+            {/* Stats bar */}
+            <div style={{display:'flex',gap:'12px',marginBottom:'10px',fontSize:'12px',
+              alignItems:'center',flexWrap:'wrap'}}>
+              <span style={{color:'var(--muted)'}}>
+                共 <strong style={{color:'var(--text)'}}>{editPersons.length}</strong> 人 ·
+                <strong style={{color:'var(--accent)'}}> {totalCount}</strong> 条记录
+              </span>
+              {parseResult?.unmatched?.length>0 && (
+                <span style={{color:'var(--yellow)'}}>⚠ {parseResult.unmatched.length} 人跳过</span>
+              )}
+              <span style={{fontSize:'11px',color:'var(--muted)',marginLeft:'auto'}}>
+                💡 点击单元格内 ✕ 删除条目，下方可新增行
+              </span>
+            </div>
+
+            {/* Editable person × weekday table */}
+            <div className="sched-table-wrap" style={{maxHeight:'340px'}}>
+              <table className="edit-tbl">
+                <thead>
+                  <tr>
+                    <th className="col-name">姓名</th>
+                    {WD_LABELS.map(w=><th key={w}>{w}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {editPersons.map(pname=>(
+                    <tr key={pname}>
+                      <td className="col-name">{pname}</td>
+                      {[0,1,2,3,4,5,6].map(wd=>{
+                        const dayData = editData[wd]?.[pname];
+                        const entries = dayData ? Object.entries(dayData) : [];
+                        return (
+                          <td key={wd}>
+                            <div className="edit-cell">
+                              {entries.map(([tn,cnt])=>{
+                                const t = types.find(t=>t.name===tn);
+                                return (
+                                  <div key={tn} className="edit-entry">
+                                    <select value={tn} onChange={e=>{
+                                      const newTn=e.target.value;
+                                      if (newTn===tn) return;
+                                      setCount(wd,pname,tn,0);
+                                      setCount(wd,pname,newTn,cnt);
+                                    }} style={{color:t?.color||'var(--text)'}}>
+                                      {types.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}
+                                    </select>
+                                    <span style={{color:'var(--muted)',fontSize:'10px'}}>×</span>
+                                    <input type="number" min="1" max="99" value={cnt}
+                                      onChange={e=>setCount(wd,pname,tn,parseInt(e.target.value)||1)}/>
+                                    <span className="del-entry"
+                                      onClick={()=>deleteEntry(wd,pname,tn)}>✕</span>
+                                  </div>
+                                );
+                              })}
+                              <button className="add-entry-btn"
+                                onClick={()=>addTypeToCell(wd,pname)}>＋</button>
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Add new person row */}
+            <div className="add-person-row">
+              <span style={{fontSize:'12px',color:'var(--muted)',flexShrink:0}}>新增行：</span>
+              <select value={newPerson} onChange={e=>setNewPerson(e.target.value)}
+                style={{flex:1,minWidth:'80px'}}>
+                <option value="">选择人员…</option>
+                {personnel.map(p=><option key={p.id} value={p.name}>{p.name}</option>)}
+              </select>
+              <select value={newWd} onChange={e=>setNewWd(parseInt(e.target.value))}>
+                {WD_LABELS.map((w,i)=><option key={i} value={i}>{w}</option>)}
+              </select>
+              <select value={newType} onChange={e=>setNewType(e.target.value)}>
+                <option value="">选类型…</option>
+                {types.map(t=><option key={t.id} value={t.name}>{t.name} {t.hours}h</option>)}
+              </select>
+              <input type="number" min="1" max="99" value={newCnt}
+                onChange={e=>setNewCnt(parseInt(e.target.value)||1)}
+                style={{width:'50px'}} placeholder="次"/>
+              <button className="btn btn-sm btn-primary" onClick={addNewRow}>添加</button>
+            </div>
+
+            {/* Footer */}
+            <div style={{display:'flex',gap:'8px',alignItems:'center',marginTop:'10px',flexWrap:'wrap'}}>
+              <button className="btn" onClick={()=>setStep(parseResult?.unmatched?.length>0?2:1)}>← 返回</button>
+              <input className="inp" placeholder="模板名称…" value={tplName}
+                onChange={e=>setTplName(e.target.value)} style={{flex:1,minWidth:'120px'}}/>
+              <button className="btn btn-primary" disabled={!totalCount} onClick={doSave}>
+                ✓ 保存为模板
+              </button>
+            </div>
+          </div>
+        )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ Confirm Modal ═════════════════════════════════════════════════════════ */
+function ConfirmModal({ msg, onOk, close, okLabel }) {
+  return (
+    <div className="overlay">
+      <div className="modal modal-sm">
+        <div className="modal-title">⚠ 确认操作</div>
+        <p style={{fontSize:'13px',color:'var(--text)',marginBottom:'18px',lineHeight:1.6}}>{msg}</p>
+        <div style={{display:'flex',justifyContent:'flex-end',gap:'8px'}}>
+          <button className="btn" onClick={close}>取消</button>
+          <button className="btn btn-danger" style={{background:'var(--red)',color:'#fff'}} onClick={onOk}>{okLabel||'确认'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ Mount ═════════════════════════════════════════════════════════════════ */
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
