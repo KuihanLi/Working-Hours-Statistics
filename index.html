@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -9,440 +9,33 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pinyin-pro@3.24.2/dist/index.js"></script>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg:#0d1117;--surface:#161b22;--surface2:#21262d;--border:#30363d;
-  --text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;--accent2:#79b8ff;
-  --green:#3fb950;--yellow:#d29922;--red:#f85149;--orange:#db6d28;
-  --shadow:rgba(0,0,0,.45);
-  --radius:6px;
-}
-body.light{
-  --bg:#f3f4f6;--surface:#ffffff;--surface2:#e9ebee;--border:#d0d5dd;
-  --text:#1a1d23;--muted:#6b7280;--accent:#2563eb;--accent2:#1d4ed8;
-  --green:#16a34a;--yellow:#b45309;--red:#dc2626;--shadow:rgba(0,0,0,.14);
-}
-body{transition:background .2s,color .2s}
-body{font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei','微软雅黑',sans-serif;
-  background:var(--bg);color:var(--text);height:100vh;overflow:hidden;display:flex;flex-direction:column;}
-::-webkit-scrollbar{width:5px;height:5px}
-::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
-
-/* ── Buttons ── */
-.btn{padding:5px 12px;border-radius:var(--radius);border:1px solid var(--border);
-  background:var(--surface2);color:var(--text);cursor:pointer;font-size:13px;
-  transition:all .15s;font-family:inherit;white-space:nowrap}
-.btn:hover{background:var(--border)}
-.btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
-.btn-primary:hover{background:var(--accent2)}
-.btn-sm{padding:3px 9px;font-size:12px}
-.btn-danger{color:var(--red);border-color:var(--red);background:transparent}
-.btn-danger:hover{background:var(--red);color:#fff}
-.btn-icon{width:28px;height:28px;display:inline-flex;align-items:center;
-  justify-content:center;border-radius:var(--radius);border:1px solid var(--border);
-  background:var(--surface2);cursor:pointer;font-size:14px;color:var(--text);
-  transition:all .15s;line-height:1}
-.btn-icon:hover{background:var(--border)}
-
-/* ── Header ── */
-.header{background:var(--surface);border-bottom:1px solid var(--border);
-  padding:8px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;
-  box-shadow:0 1px 10px var(--shadow)}
-.logo{font-size:15px;font-weight:700;color:var(--accent);letter-spacing:.5px;
-  display:flex;align-items:center;gap:6px}
-.logo span{font-size:18px}
-.sep{width:1px;height:20px;background:var(--border)}
-.spacer{flex:1}
-.view-toggle{display:flex;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
-.view-toggle button{padding:4px 14px;background:transparent;border:none;
-  color:var(--muted);cursor:pointer;font-size:13px;font-family:inherit;transition:all .15s}
-.view-toggle button.active{background:var(--accent);color:#fff}
-.view-toggle button:not(.active):hover{background:var(--surface2);color:var(--text)}
-.date-nav{display:flex;align-items:center;gap:6px}
-.date-label{font-size:13px;font-weight:600;min-width:175px;text-align:center;color:var(--text)}
-.date-label.today-indicator{color:var(--accent)}
-
-/* ── Layout ── */
-.app-body{display:flex;flex:1;overflow:hidden}
-
-/* ── Sidebar ── */
-.sidebar{width:195px;background:var(--surface);border-right:1px solid var(--border);
-  display:flex;flex-direction:column;flex-shrink:0}
-.sidebar-head{padding:8px;border-bottom:1px solid var(--border);position:relative}
-.sidebar-head .search-wrap{position:relative;display:flex;align-items:center}
-.sidebar-head input{width:100%;padding:6px 28px 6px 10px;background:var(--bg);border:1px solid var(--border);
-  border-radius:var(--radius);color:var(--text);font-size:12px;outline:none;font-family:inherit}
-.sidebar-head input:focus{border-color:var(--accent)}
-.sidebar-head input::placeholder{color:var(--muted)}
-.person-list{flex:1;overflow-y:auto;padding:4px}
-.person-item{display:flex;align-items:center;justify-content:space-between;
-  padding:6px 8px;border-radius:var(--radius);cursor:default;
-  transition:background .1s;position:relative;gap:4px}
-.person-item:hover{background:var(--surface2)}
-.person-item .pname{font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.person-item .phours{font-size:11px;color:var(--muted);font-family:'SF Mono','Consolas',monospace;
-  background:var(--surface2);padding:1px 5px;border-radius:3px;flex-shrink:0}
-.person-item:hover .phours{display:none}
-.person-item .pdel{display:none;font-size:11px;color:var(--red);cursor:pointer;
-  padding:1px 5px;border-radius:3px;border:1px solid var(--red);flex-shrink:0}
-.person-item:hover .pdel{display:block}
-.person-item .pdel:hover{background:var(--red);color:#fff}
-.sidebar-foot{padding:8px;border-top:1px solid var(--border);font-size:11px;
-  color:var(--muted);line-height:1.6}
-.sidebar-foot-actions{display:flex;gap:5px;margin-top:6px}
-
-/* ── Main ── */
-.main{flex:1;overflow:auto;padding:14px;background:var(--bg)}
-
-/* ── Grid Table ── */
-.grid-wrap{overflow:auto;border-radius:8px;border:1px solid var(--border)}
-.grid-table{width:100%;border-collapse:collapse;min-width:500px;table-layout:auto}
-.grid-table th{background:var(--surface);border:1px solid var(--border);
-  padding:7px 10px;font-size:12px;font-weight:600;text-align:center;white-space:nowrap}
-.grid-table th.col-name{text-align:left;min-width:78px;position:sticky;left:0;z-index:3;
-  background:var(--surface)}
-.grid-table td{border:1px solid var(--border);background:var(--bg);vertical-align:middle;
-  padding:4px 8px;text-align:center}
-.grid-table td.col-name{text-align:left;font-size:13px;font-weight:500;
-  background:var(--surface);position:sticky;left:0;z-index:1;padding:6px 10px}
-.grid-table tr:hover td{background:rgba(88,166,255,.04)}
-.grid-table tr:hover td.col-name{background:var(--surface)}
-.th-type{border-top:3px solid;padding-top:5px!important}
-/* Total row */
-.row-total td{background:var(--surface)!important;font-weight:600}
-.row-total td.col-name{font-weight:700}
-/* Counter */
-.counter-wrap{display:flex;align-items:center;justify-content:center;gap:7px;padding:2px 0}
-.cbtn{width:26px;height:26px;border-radius:5px;border:1px solid var(--border);
-  background:var(--surface2);color:var(--text);cursor:pointer;font-size:17px;
-  display:flex;align-items:center;justify-content:center;line-height:1;
-  transition:all .12s;font-family:monospace;flex-shrink:0;user-select:none}
-.cbtn:not(:disabled):hover.minus{background:var(--red);border-color:var(--red);color:#fff}
-.cbtn:not(:disabled):hover.plus{background:var(--green);border-color:var(--green);color:#fff}
-.cbtn:disabled{opacity:.25;cursor:not-allowed}
-.cval{font-size:15px;font-weight:700;min-width:22px;text-align:center;
-  font-family:'SF Mono','Consolas',monospace;line-height:1}
-.chours{font-size:10px;color:var(--muted);text-align:center;margin-top:1px}
-/* Week cell */
-.wcell{font-size:14px;font-weight:600;font-family:'SF Mono','Consolas',monospace;
-  cursor:pointer;padding:8px;display:block}
-.wcell.zero{color:var(--muted);font-weight:400}
-.wcell.has-data{color:var(--accent)}
-/* Week day header */
-.wdh{display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer}
-.wdh .wd-name{font-size:11px;color:var(--muted)}
-.wdh .wd-date{font-size:13px;font-weight:600}
-.wdh.is-today .wd-name,.wdh.is-today .wd-date{color:var(--accent)}
-.today-pill{font-size:9px;background:var(--accent);color:#fff;padding:1px 4px;border-radius:3px}
-/* Total col */
-.col-total{background:var(--surface)!important}
-td.col-total{color:var(--yellow)!important;font-weight:600;font-family:'SF Mono','Consolas',monospace}
-
-/* ── Badges ── */
-.badge{display:inline-flex;align-items:center;gap:3px;padding:1px 7px;
-  border-radius:4px;font-size:11px;font-weight:600;border:1px solid}
-
-
-
-
-/* ── Raw grid view ── */
-.raw-grid-wrap{overflow:auto;max-height:420px;border:1px solid var(--border);border-radius:6px;margin:8px 0}
-.raw-grid{border-collapse:collapse;font-size:11px;white-space:nowrap}
-.raw-grid td,.raw-grid th{
-  border:1px solid var(--border);padding:3px 6px;min-width:28px;max-width:120px;
-  overflow:hidden;text-overflow:ellipsis;text-align:center;line-height:1.4}
-.raw-grid th{background:var(--surface2);font-weight:600;position:sticky;top:0;z-index:3}
-.raw-grid th.row-hdr{position:sticky;left:0;z-index:4}
-.raw-grid td.row-hdr{background:var(--surface2);font-weight:600;position:sticky;left:0;z-index:2;color:var(--muted);font-size:10px}
-.raw-grid .cell-matched{background:var(--green)33!important;color:var(--green)!important;font-weight:700;border-color:var(--green)88!important}
-.raw-grid .cell-type{background:var(--accent)22!important;color:var(--accent)!important;font-weight:600}
-.raw-grid .cell-header{background:var(--surface2)!important;color:var(--muted)!important;font-style:italic}
-.raw-grid .cell-unmatched{background:var(--yellow)22!important;color:var(--yellow)!important;border-color:var(--yellow)88!important}
-.raw-grid .cell-empty{color:var(--border)}
-.preview-tabs{display:flex;gap:0;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:10px}
-.preview-tab{flex:1;padding:5px 10px;text-align:center;font-size:12px;cursor:pointer;
-  background:transparent;border:none;color:var(--muted);font-family:inherit;transition:all .15s}
-.preview-tab.active{background:var(--accent);color:#fff}
-.preview-tab:not(.active):hover{background:var(--surface2);color:var(--text)}
-
-
-/* ── Editable template table ── */
-.edit-tbl{width:100%;border-collapse:collapse;font-size:12px}
-.edit-tbl th{background:var(--surface2);border:1px solid var(--border);
-  padding:5px 8px;text-align:center;position:sticky;top:0;z-index:2;white-space:nowrap}
-.edit-tbl th.col-name{text-align:left;min-width:70px}
-.edit-tbl td{border:1px solid var(--border);padding:3px 5px;vertical-align:top}
-.edit-tbl td.col-name{font-weight:600;background:var(--surface);position:sticky;left:0;z-index:1}
-.edit-tbl tr:hover td{background:var(--surface2)22}
-.edit-tbl tr:hover td.col-name{background:var(--surface)}
-.edit-cell{display:flex;flex-direction:column;gap:2px;min-width:70px}
-.edit-entry{display:flex;align-items:center;gap:3px;padding:2px 4px;
-  border-radius:4px;background:var(--surface2);border:1px solid var(--border)}
-.edit-entry select{background:transparent;border:none;color:var(--text);
-  font-size:11px;font-family:inherit;cursor:pointer;outline:none;padding:0;max-width:55px}
-.edit-entry input[type=number]{width:32px;background:transparent;border:none;
-  color:var(--text);font-size:11px;font-family:'SF Mono','Consolas',monospace;
-  text-align:center;outline:none;padding:0}
-.edit-entry .del-entry{color:var(--muted);cursor:pointer;font-size:10px;line-height:1;
-  flex-shrink:0;padding:0 2px}
-.edit-entry .del-entry:hover{color:var(--red)}
-.add-entry-btn{font-size:11px;padding:2px 5px;margin-top:2px;cursor:pointer;
-  color:var(--accent);border:1px dashed var(--accent);border-radius:4px;
-  background:transparent;font-family:inherit;width:100%;text-align:center}
-.add-entry-btn:hover{background:var(--accent)15}
-.add-person-row{display:flex;gap:6px;align-items:center;padding:8px 0;
-  border-top:1px dashed var(--border);margin-top:6px;flex-wrap:wrap}
-.add-person-row select,.add-person-row input{padding:4px 7px;border-radius:var(--radius);
-  border:1px solid var(--border);background:var(--bg);color:var(--text);
-  font-size:12px;font-family:inherit;outline:none}
-.add-person-row select:focus,.add-person-row input:focus{border-color:var(--accent)}
-
-/* ── Diff mode ── */
-.diff-on .counter-wrap{position:relative}
-.diff-badge{position:absolute;bottom:2px;right:3px;font-size:9px;font-weight:700;
-  line-height:1;padding:1px 3px;border-radius:3px;font-family:'SF Mono','Consolas',monospace;
-  pointer-events:none;z-index:2}
-.diff-badge.pos{background:var(--green)33;color:var(--green);border:1px solid var(--green)66}
-.diff-badge.neg{background:var(--red)33;color:var(--red);border:1px solid var(--red)66}
-.diff-badge.zero{background:var(--muted)22;color:var(--muted);border:1px solid var(--muted)44}
-.diff-active-btn{background:var(--accent)!important;color:#fff!important;border-color:var(--accent)!important}
-/* Week diff cell */
-.wcell-wrap{position:relative;display:inline-block}
-.wdiff-badge{position:absolute;bottom:-1px;right:0;font-size:9px;font-weight:700;
-  padding:1px 3px;border-radius:3px;font-family:'SF Mono','Consolas',monospace;
-  line-height:1;pointer-events:none}
-.wdiff-badge.pos{background:var(--green)33;color:var(--green);border:1px solid var(--green)66}
-.wdiff-badge.neg{background:var(--red)33;color:var(--red);border:1px solid var(--red)66}
-.wdiff-badge.zero{background:var(--muted)22;color:var(--muted);border:1px solid var(--muted)44}
-
-/* ── Calendar Picker ── */
-.cal-anchor{position:relative;display:inline-flex;align-items:center}
-.cal-popup{position:absolute;top:calc(100% + 6px);left:50%;transform:translateX(-50%);
-  background:var(--surface);border:1px solid var(--border);border-radius:10px;
-  box-shadow:0 8px 32px var(--shadow);z-index:500;padding:14px;width:266px;
-  animation:calIn .12s ease}
-@keyframes calIn{from{opacity:0;transform:translateX(-50%) translateY(-6px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
-.cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
-.cal-title{font-size:13px;font-weight:700;cursor:pointer;padding:3px 8px;border-radius:5px;
-  transition:background .12s}
-.cal-title:hover{background:var(--surface2)}
-.cal-nav{width:26px;height:26px;display:flex;align-items:center;justify-content:center;
-  border-radius:5px;border:1px solid var(--border);background:var(--surface2);
-  cursor:pointer;font-size:14px;color:var(--text);transition:background .12s;user-select:none}
-.cal-nav:hover{background:var(--border)}
-.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
-.cal-wd{font-size:10px;color:var(--muted);text-align:center;padding:3px 0;font-weight:600}
-.cal-day{font-size:12px;text-align:center;padding:5px 2px;border-radius:5px;
-  cursor:pointer;transition:all .1s;line-height:1.3;border:1px solid transparent}
-.cal-day:hover{background:var(--surface2)}
-.cal-day.other-month{color:var(--border)}
-.cal-day.is-today{color:var(--accent);font-weight:700}
-.cal-day.selected{background:var(--accent)!important;color:#fff!important;border-color:var(--accent)}
-.cal-day.in-week{background:rgba(88,166,255,.12);border-color:rgba(88,166,255,.2)}
-.cal-day.week-start{border-radius:5px 0 0 5px}
-.cal-day.week-end{border-radius:0 5px 5px 0}
-.cal-day.has-data::after{content:'';display:block;width:4px;height:4px;border-radius:50%;
-  background:currentColor;margin:1px auto 0;opacity:.7}
-.cal-day.empty{cursor:default}
-.cal-month-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:4px}
-.cal-month-item{padding:7px 4px;border-radius:6px;text-align:center;font-size:12px;
-  cursor:pointer;border:1px solid transparent;transition:all .1s}
-.cal-month-item:hover{background:var(--surface2)}
-.cal-month-item.selected{background:var(--accent);color:#fff}
-.cal-year-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:4px}
-.cal-year-item{padding:6px 2px;border-radius:6px;text-align:center;font-size:12px;
-  cursor:pointer;border:1px solid transparent;transition:all .1s}
-.cal-year-item:hover{background:var(--surface2)}
-.cal-year-item.selected{background:var(--accent);color:#fff}
-.cal-footer{margin-top:10px;display:flex;gap:6px}
-
-
-/* ── Visibility checkbox ── */
-.person-item .pcheck{
-  width:14px;height:14px;flex-shrink:0;cursor:pointer;accent-color:var(--accent);
-  margin-right:1px}
-.person-item.hidden-row .pname{color:var(--muted);text-decoration:line-through}
-.person-item.hidden-row .phours{opacity:.4}
-.sidebar-toolbar{display:flex;gap:4px;padding:5px 8px;border-bottom:1px solid var(--border);
-  flex-wrap:wrap}
-.sidebar-toolbar button{flex:1;font-size:10px;padding:3px 4px;min-width:0}
-.hide-count{display:inline-flex;align-items:center;justify-content:center;
-  min-width:16px;height:16px;border-radius:8px;background:var(--yellow);
-  color:#000;font-size:9px;font-weight:700;margin-left:3px;padding:0 3px}
-
-/* ── Theme toggle ── */
-.theme-btn{width:30px;height:30px;display:flex;align-items:center;justify-content:center;
-  border-radius:var(--radius);border:1px solid var(--border);background:var(--surface2);
-  cursor:pointer;font-size:15px;transition:all .15s;flex-shrink:0}
-.theme-btn:hover{background:var(--border)}
-/* ── Template badge ── */
-.tpl-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;
-  border-radius:var(--radius);font-size:12px;background:var(--yellow)22;
-  border:1px solid var(--yellow);color:var(--yellow);font-weight:600}
-.tpl-badge .tpl-name{max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
-
-/* ── Schedule Import Modal ── */
-.sched-table-wrap{overflow:auto;max-height:320px;border:1px solid var(--border);border-radius:6px;margin:10px 0}
-.sched-table{width:100%;border-collapse:collapse;font-size:12px}
-.sched-table th{background:var(--surface2);border:1px solid var(--border);padding:5px 8px;
-  white-space:nowrap;position:sticky;top:0;z-index:2}
-.sched-table td{border:1px solid var(--border);padding:4px 7px;vertical-align:top}
-.sched-table td.type-cell{background:var(--surface2);font-weight:600;white-space:nowrap;max-width:140px}
-.sched-table .type-badge{display:inline-flex;align-items:center;gap:3px;
-  padding:1px 5px;border-radius:3px;font-size:11px;font-weight:600;border:1px solid}
-.name-chip{display:inline-flex;align-items:center;gap:2px;padding:1px 5px;margin:1px;
-  border-radius:3px;font-size:11px;border:1px solid}
-.name-chip.ok{color:var(--green);border-color:var(--green);background:var(--green)1a}
-.name-chip.warn{color:var(--yellow);border-color:var(--yellow);background:var(--yellow)1a}
-.name-chip.err{color:var(--red);border-color:var(--red);background:var(--red)1a}
-.rule-row{display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap}
-.rule-row .arr{color:var(--muted);flex-shrink:0}
-.rule-sel{padding:4px 8px;border-radius:var(--radius);border:1px solid var(--border);
-  background:var(--bg);color:var(--text);font-size:12px;font-family:inherit;cursor:pointer;outline:none}
-.rule-sel:focus{border-color:var(--accent)}
-.step-tabs{display:flex;gap:0;border:1px solid var(--border);border-radius:var(--radius);
-  overflow:hidden;margin-bottom:14px}
-.step-tab{flex:1;padding:6px;text-align:center;font-size:12px;font-weight:600;cursor:pointer;
-  background:transparent;border:none;color:var(--muted);font-family:inherit;transition:all .15s}
-.step-tab.active{background:var(--accent);color:#fff}
-.step-tab.done{color:var(--green)}
-.step-num{display:inline-flex;width:18px;height:18px;border-radius:50%;background:currentColor;
-  color:var(--surface);align-items:center;justify-content:center;font-size:10px;margin-right:4px}
-
-/* ── Modal ── */
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;
-  align-items:center;justify-content:center;z-index:200;backdrop-filter:blur(4px)}
-.modal{background:var(--surface);border:1px solid var(--border);border-radius:10px;
-  padding:22px;width:480px;max-width:calc(100vw - 32px);max-height:85vh;overflow-y:auto}
-.modal-lg{width:560px}
-.modal-sm{width:320px}
-.modal-title{font-size:15px;font-weight:700;margin-bottom:16px;
-  display:flex;align-items:center;justify-content:space-between}
-.modal-title .close{background:none;border:none;color:var(--muted);
-  cursor:pointer;font-size:17px;padding:0;line-height:1}
-.modal-title .close:hover{color:var(--text)}
-/* Form */
-.field{margin-bottom:11px}
-.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
-.inp{width:100%;padding:7px 10px;background:var(--bg);border:1px solid var(--border);
-  border-radius:var(--radius);color:var(--text);font-size:13px;outline:none;
-  font-family:inherit;transition:border-color .15s}
-.inp:focus{border-color:var(--accent)}
-textarea.inp{resize:vertical;min-height:130px;line-height:1.65}
-.inp-sm{width:80px}
-.form-row{display:flex;align-items:center;gap:8px;margin-bottom:10px}
-.form-row .inp{flex:1}
-/* Type list item */
-.type-item{display:flex;align-items:center;gap:8px;padding:8px;
-  background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);
-  margin-bottom:7px}
-.color-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0}
-/* Color picker */
-
-input[type=date]{color-scheme:dark}
-body.light input[type=date]{color-scheme:light}
-input[type=color]{width:32px;height:32px;border:none;background:none;
-  cursor:pointer;padding:0;flex-shrink:0;border-radius:4px}
-/* Radio row */
-.radio-row{display:flex;align-items:center;gap:14px;font-size:13px}
-.radio-row label{display:flex;align-items:center;gap:5px;cursor:pointer}
-/* Divider */
-.divider{border:none;border-top:1px solid var(--border);margin:12px 0}
-/* Empty */
-.empty{text-align:center;padding:50px 20px;color:var(--muted)}
-.empty .icon{font-size:36px;margin-bottom:10px}
-.empty p{font-size:13px}
-/* Tag */
-.tag-section{font-size:11px;color:var(--muted);text-transform:uppercase;
-  letter-spacing:.5px;margin-bottom:8px;margin-top:12px;font-weight:600}
-/* Info row */
-.info-bar{display:flex;gap:16px;margin-bottom:12px;font-size:12px;color:var(--muted);
-  align-items:center;flex-wrap:wrap}
-.info-bar .info-item{display:flex;align-items:center;gap:4px}
-.info-bar .info-val{color:var(--text);font-weight:600}
-</style>
+<link rel="stylesheet" href="./assets/css/styles.css">
 </head>
 <body>
 <div id="root"></div>
 <script>document.body.classList.toggle("light",localStorage.getItem("wh_theme")==="light")</script>
+<script src="./assets/js/core.js"></script>
 <script type="text/babel">
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
 /* ═══ Pinyin Search (via pinyin-pro) ══════════════════════════════════════ */
-function matchSearch(name, q) {
-  if (!q) return true;
-  const ql = q.toLowerCase().trim();
-  if (!ql) return true;
-  if (name.toLowerCase().includes(ql)) return true;
-  try {
-    const lib = window.pinyinPro;
-    if (lib) {
-      const initials = lib.pinyin(name, { pattern: 'first', toneType: 'none', separator: '' });
-      if (initials.toLowerCase().includes(ql)) return true;
-      const full = lib.pinyin(name, { toneType: 'none', separator: '' });
-      if (full.toLowerCase().includes(ql)) return true;
-    }
-  } catch(e) {}
-  return false;
-}
-
-/* ═══ Date Utils ════════════════════════════════════════════════════════════ */
-function fmt(d) {
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-}
-function addDays(d, n) { const r=new Date(d); r.setDate(r.getDate()+n); return r; }
-function getMonday(d) {
-  const r=new Date(d); const day=r.getDay();
-  r.setDate(r.getDate()+(day===0?-6:1-day)); return r;
-}
-function weekDates(mon) { return Array.from({length:7},(_,i)=>addDays(mon,i)); }
-function isToday(d) {
-  const t=new Date();
-  return d.getFullYear()===t.getFullYear()&&d.getMonth()===t.getMonth()&&d.getDate()===t.getDate();
-}
-function fmtShort(d) { return `${d.getMonth()+1}/${d.getDate()}`; }
-function fmtMid(d) { return `${d.getMonth()+1}月${d.getDate()}日`; }
-
-const WD = ['周一','周二','周三','周四','周五','周六','周日'];
-const WD_FULL = ['周日','周一','周二','周三','周四','周五','周六'];
-
-/* ═══ Defaults ══════════════════════════════════════════════════════════════ */
-const DEF_TYPES = [
-  {id:'t1',name:'巡查',hours:1,  color:'#3fb950'},
-  {id:'t2',name:'值班1',hours:2, color:'#58a6ff'},
-  {id:'t3',name:'值班2',hours:2.5,color:'#d29922'},
-];
-const DEF_PERSONNEL = [
-  {id:'p1',name:'张三'},
-  {id:'p2',name:'李四'},
-  {id:'p3',name:'王五'},
-];
-
-let _id = 1000;
-function uid() { return `id_${++_id}_${Date.now()%100000}`; }
-
-function loadLS(key, def) {
-  try { const v=localStorage.getItem(key); return v?JSON.parse(v):def; } catch { return def; }
-}
-
-/* ═══ App ═══════════════════════════════════════════════════════════════════ */
 function App() {
   const [personnel, setPersonnel] = useState(()=>loadLS('wh_personnel', DEF_PERSONNEL));
   const [types, setTypes]         = useState(()=>loadLS('wh_types', DEF_TYPES));
   const [records, setRecords]     = useState(()=>loadLS('wh_records', {}));
   const [view, setView]           = useState('day');
+  const [weekMode, setWeekMode]   = useState('stats');
   const [curDate, setCurDate]     = useState(new Date());
   const [search, setSearch]       = useState('');
   const [modal, setModal]         = useState(null);
   const [confirmCb, setConfirmCb] = useState(null);
   const [theme, setTheme]         = useState(()=>loadLS('wh_theme','dark'));
-  const [template, setTemplate]   = useState(null);   // {name, data:{relDay(0-6):{pid_name:{tid_name:count}}}}
+  const [template, setTemplate]   = useState(()=>loadLS('wh_template', null));   // {name, data:{relDay(0-6):{pid_name:{tid_name:count}}}}
   const [hiddenIds, setHiddenIds] = useState(()=>{ try{ return new Set(JSON.parse(localStorage.getItem('wh_hidden')||'[]')); }catch{ return new Set(); } });
   const [autoHide,  setAutoHide]  = useState(()=>loadLS('wh_autohide', false));
   const [showDiff,  setShowDiff]  = useState(false);
+  const [scheduleRules, setScheduleRules] = useState(()=>normalizeScheduleRules(loadLS('wh_schedule_rules', makeEmptyScheduleRules())));
+  const [flowCollapsed, setFlowCollapsed] = useState(()=>loadLS('wh_flow_collapsed', false));
   const importRecRef = useRef();
   const importPplRef = useRef();
   const importTplRef = useRef();
@@ -456,6 +49,16 @@ function App() {
   useEffect(()=>{
     localStorage.setItem('wh_autohide', JSON.stringify(autoHide));
   },[autoHide]);
+  useEffect(()=>{
+    localStorage.setItem('wh_schedule_rules', JSON.stringify(scheduleRules));
+  },[scheduleRules]);
+  useEffect(()=>{
+    if (template) localStorage.setItem('wh_template', JSON.stringify(template));
+    else localStorage.removeItem('wh_template');
+  },[template]);
+  useEffect(()=>{
+    localStorage.setItem('wh_flow_collapsed', JSON.stringify(flowCollapsed));
+  },[flowCollapsed]);
   // Auto-hide zero-hours people when autoHide is on and view/date changes
   useEffect(()=>{
     if (!autoHide) return;
@@ -578,9 +181,17 @@ function App() {
 
   const isCurrentToday = view==='day' && curStr===todayStr;
   const isCurrentWeekHasToday = view==='week' && wDates.some(d=>fmt(d)===todayStr);
+  const stats = {
+    totalRecordDays: Object.keys(records).length,
+    totalEntries: Object.values(records).reduce((sum, day) =>
+      sum + Object.values(day).reduce((ss, person) =>
+        ss + Object.values(person).reduce((n,v)=>n+(parseInt(v,10)||0),0), 0), 0),
+    aliasRuleCount: Object.keys(scheduleRules.personAliases).length,
+    parserRuleCount: scheduleRules.typeRules.length + scheduleRules.weekdayRules.length + scheduleRules.ignoreRules.length,
+  };
 
   /* ── Export Excel ── */
-  function exportExcel(mode, rangeStart, rangeEnd) {
+  function exportExcel(mode, rangeStart, rangeEnd, bonusHours = {}) {
     let allDates = Object.keys(records).sort();
     if (!allDates.length) { alert('暂无记录可导出'); return; }
     if (rangeStart) allDates = allDates.filter(d=>d>=rangeStart);
@@ -590,14 +201,17 @@ function App() {
 
     /* Sheet: 小时统计(按日) */
     if (mode==='day'||mode==='both') {
-      const hdr = ['姓名', ...allDates.map(d=>d.slice(5)), '合计(h)'];
+      const hdr = ['姓名', ...allDates.map(d=>d.slice(5)), '奖励工时(h)', '合计(h)'];
       const body = personnel.map(p => {
         let tot=0;
-        const row = [p.name, ...allDates.map(d=>{ const h=dayHours(d,p.id); tot+=h; return h||0; }), tot];
+        const bonus = parseFloat(bonusHours[p.id]) || 0;
+        const row = [p.name, ...allDates.map(d=>{ const h=dayHours(d,p.id); tot+=h; return h||0; }), bonus||0, tot + bonus];
         return row;
       });
+      const bonusTotal = personnel.reduce((s,p)=>s+(parseFloat(bonusHours[p.id])||0),0);
       const foot = ['合计', ...allDates.map(d=>personnel.reduce((s,p)=>s+dayHours(d,p.id),0)),
-                    personnel.reduce((s,p)=>s+allDates.reduce((h,d)=>h+dayHours(d,p.id),0),0)];
+                    bonusTotal,
+                    personnel.reduce((s,p)=>s+allDates.reduce((h,d)=>h+dayHours(d,p.id),0),0) + bonusTotal];
       const ws = XLSX.utils.aoa_to_sheet([hdr,...body,foot]);
       _styleSheet(ws, allDates.length+2);
       XLSX.utils.book_append_sheet(wb, ws, '小时统计(按日)');
@@ -614,13 +228,18 @@ function App() {
         weekMap[key].dates.push(d);
       }
       const wks = Object.keys(weekMap).sort();
-      const hdr = ['姓名', ...wks.map(k=>weekMap[k].label), '合计(h)'];
+      const hdr = ['姓名', ...wks.map(k=>weekMap[k].label), '奖励工时(h)', '合计(h)'];
       const body = personnel.map(p => {
         let tot=0;
-        const row = [p.name, ...wks.map(k=>{ const h=weekMap[k].dates.reduce((s,d)=>s+dayHours(d,p.id),0); tot+=h; return h||0; }), tot];
+        const bonus = parseFloat(bonusHours[p.id]) || 0;
+        const row = [p.name, ...wks.map(k=>{ const h=weekMap[k].dates.reduce((s,d)=>s+dayHours(d,p.id),0); tot+=h; return h||0; }), bonus||0, tot + bonus];
         return row;
       });
-      const ws = XLSX.utils.aoa_to_sheet([hdr,...body]);
+      const bonusTotal = personnel.reduce((s,p)=>s+(parseFloat(bonusHours[p.id])||0),0);
+      const foot = ['合计', ...wks.map(k=>personnel.reduce((s,p)=>s+weekMap[k].dates.reduce((ss,d)=>ss+dayHours(d,p.id),0),0)),
+                    bonusTotal,
+                    body.reduce((s,row)=>s+(parseFloat(row[row.length-1])||0),0)];
+      const ws = XLSX.utils.aoa_to_sheet([hdr,...body,foot]);
       XLSX.utils.book_append_sheet(wb, ws, '小时统计(按周)');
     }
 
@@ -992,7 +611,14 @@ function App() {
               </span></span>
             </>)}
             {view==='week' && (<>
-              <span className="info-item">🗓 本周上工人次</span>
+              <span className="info-item">🗓 周视图</span>
+              <span className="info-item">
+                模式:
+                <span className="week-mode-toggle">
+                  <button className={weekMode==='stats'?'active':''} onClick={()=>setWeekMode('stats')}>统计</button>
+                  <button className={weekMode==='revise'?'active':''} onClick={()=>setWeekMode('revise')}>修订</button>
+                </span>
+              </span>
               <span className="info-item">总工时: <span className="info-val" style={{color:'var(--yellow)'}}>
                 {tablePersonnel.reduce((s,p)=>s+weekHours(p.id),0).toFixed(1)} h
               </span></span>
@@ -1014,13 +640,33 @@ function App() {
             </span>
           </div>
 
+          <WorkflowPanel
+            personnelCount={personnel.length}
+            typeCount={types.length}
+            hasTemplate={!!template}
+            recordDays={stats.totalRecordDays}
+            ruleCount={stats.aliasRuleCount + stats.parserRuleCount}
+            view={view}
+            weekMode={weekMode}
+            collapsed={flowCollapsed}
+            onToggleCollapsed={()=>setFlowCollapsed(v=>!v)}
+            setView={setView}
+            setWeekMode={setWeekMode}
+            openPeople={()=>setModal('people')}
+            openTypes={()=>setModal('types')}
+            openSchedule={()=>setModal('schedule')}
+            openExport={()=>setModal('export')}
+            applyTemplate={template ? applyTemplate : null}
+          />
+
           {view==='day'
             ? <DayView personnel={diffPersonnel} types={types} dateStr={curStr}
                 getCount={getCount} update={update} dayHours={dayHours}
                 showDiff={showDiff} getTplCount={getTplCount} curDate={curDate}/>
             : <WeekView personnel={diffPersonnel} types={types} wDates={wDates}
                 dayHours={dayHours} setCurDate={setCurDate} setView={setView}
-                showDiff={showDiff} getTplCount={getTplCount} template={template}/>
+                showDiff={showDiff} getTplCount={getTplCount} template={template}
+                records={records} update={update} weekMode={weekMode} setWeekMode={setWeekMode}/>
           }
         </div>
       </div>
@@ -1028,12 +674,120 @@ function App() {
       {/* ── Modals ── */}
       {modal==='types'      && <TypeModal   types={types}   setTypes={setTypes}   close={()=>setModal(null)}/>}
       {modal==='people'     && <PeopleModal personnel={personnel} setPersonnel={setPersonnel} close={()=>setModal(null)}/>}
-      {modal==='export'     && <ExportModal onExport={exportExcel} allDates={Object.keys(records).sort()} close={()=>setModal(null)}/>}
+      {modal==='export'     && <ExportModal onExport={exportExcel} allDates={Object.keys(records).sort()} close={()=>setModal(null)} personnel={personnel} dayHours={dayHours}/>}
       {modal==='confirm'    && <ConfirmModal msg="确认清空所有记录？此操作不可撤销。" onOk={confirmCb} close={()=>setModal(null)}/>}
       {modal==='confirm-all'&& <ConfirmModal msg="将清空全部数据：所有工时记录、人员名单（工时类型恢复默认）。此操作不可撤销！" onOk={confirmCb} close={()=>setModal(null)} okLabel="全部清空"/>}
       {modal==='confirm-tpl'&& <ConfirmModal msg={`将用模板「${template?.name}」覆盖当前${view==='week'?'一周':'一天'}的工时数据，已有记录将被替换。确认？`} onOk={confirmCb} close={()=>setModal(null)} okLabel="应用"/>}
-      {modal==='schedule'   && <ScheduleImportModal personnel={personnel} types={types} onSave={tpl=>{setTemplate(tpl);setModal(null);}} close={()=>setModal(null)}/>}
+      {modal==='schedule'   && <ScheduleImportModal personnel={personnel} types={types} initialRules={scheduleRules} onSaveRules={setScheduleRules} onSave={tpl=>{setTemplate(tpl);setModal(null);}} close={()=>setModal(null)}/>}
       {modal==='view-tpl'   && <TemplateViewModal template={template} types={types} onClear={()=>{setTemplate(null);setModal(null);}} close={()=>setModal(null)}/>}
+    </div>
+  );
+}
+
+function WorkflowPanel({ personnelCount, typeCount, hasTemplate, recordDays, ruleCount, view, weekMode, collapsed, onToggleCollapsed, setView, setWeekMode, openPeople, openTypes, openSchedule, openExport, applyTemplate }) {
+  const cards = [
+    {
+      key:'people',
+      step:'01',
+      title:'整理人员',
+      desc:'先导入或维护名单，避免排班解析时出现大量未匹配姓名。',
+      meta:`当前 ${personnelCount} 人`,
+      status: personnelCount ? 'done' : 'active',
+      action:<button className="btn btn-sm" onClick={openPeople}>{personnelCount ? '维护人员' : '导入人员'}</button>,
+    },
+    {
+      key:'types',
+      step:'02',
+      title:'校准工时类型',
+      desc:'确认默认工时是否够用。特殊奖励工时或自定义班次建议先配置。',
+      meta:`当前 ${typeCount} 种类型`,
+      status: typeCount >= 3 ? 'done' : 'active',
+      action:<button className="btn btn-sm" onClick={openTypes}>调整类型</button>,
+    },
+    {
+      key:'schedule',
+      step:'03',
+      title:'转排班为模板',
+      desc:'导入排班表、配置解析规则、修正识别结果，再保存为周模板。',
+      meta:`已保存 ${ruleCount} 条规则`,
+      status: hasTemplate ? 'done' : 'active',
+      action:<button className="btn btn-sm btn-primary" onClick={openSchedule}>打开转模板</button>,
+    },
+    {
+      key:'apply',
+      step:'04',
+      title:'套用并校对',
+      desc:'先在按周-修订模式套用模板并替换人员，再切到按天逐格核对统计差异。',
+      meta: hasTemplate ? `模板已缓存，当前周模式：${weekMode==='revise'?'修订':'统计'}` : '尚未缓存模板',
+      status: hasTemplate ? 'active' : 'todo',
+      action:<div className="flow-actions">{applyTemplate && <button className="btn btn-sm" onClick={applyTemplate}>应用模板</button>}<button className="btn btn-sm" onClick={()=>{ setView('week'); setWeekMode('revise'); }}>进入周修订</button><button className="btn btn-sm" onClick={()=>setView(view==='day'?'week':'day')}>{view==='day'?'切到按周':'切到按天'}</button></div>,
+    },
+    {
+      key:'export',
+      step:'05',
+      title:'导出结果',
+      desc:'导出按日、按周和工时明细，便于归档、复盘和再次导入。',
+      meta:`当前累计 ${recordDays} 天记录`,
+      status: recordDays ? 'active' : 'todo',
+      action:<button className="btn btn-sm" onClick={openExport} disabled={!recordDays}>导出 Excel</button>,
+    },
+  ];
+
+  const badgeLabel = status => status==='done' ? '已就绪' : status==='active' ? '下一步' : '待处理';
+
+  return (
+    <div className="flow-panel">
+      <div className="flow-head">
+        <div>
+          <div className="flow-title">操作流程面板</div>
+          <div className="flow-sub">把“人员维护、工时配置、排班转模板、周修订、按天核对、导出”串成一条线。首次使用按顺序走，日常补录优先从按周修订进入，再回到按天核对。</div>
+        </div>
+        <div className="flow-head-actions">
+          <div className="flow-actions">
+            <span className={`flow-badge ${hasTemplate ? 'done' : 'todo'}`}>{hasTemplate ? '模板已缓存' : '尚无模板'}</span>
+            <span className={`flow-badge ${recordDays ? 'active' : 'todo'}`}>{recordDays ? `${recordDays} 天记录` : '暂无记录'}</span>
+          </div>
+          <button className={`flow-toggle ${collapsed?'collapsed':''}`} onClick={onToggleCollapsed}>
+            <span className="arrow">⌄</span>
+            <span>{collapsed ? '展开流程' : '收起流程'}</span>
+          </button>
+        </div>
+      </div>
+      {collapsed ? (
+        <div className="flow-summary">
+          <div className="flow-summary-card">
+            <strong>{personnelCount}</strong>
+            <span>在册人员</span>
+          </div>
+          <div className="flow-summary-card">
+            <strong>{typeCount}</strong>
+            <span>工时类型</span>
+          </div>
+          <div className="flow-summary-card">
+            <strong>{ruleCount}</strong>
+            <span>解析规则</span>
+          </div>
+          <div className="flow-summary-card">
+            <strong>{recordDays}</strong>
+            <span>记录天数</span>
+          </div>
+        </div>
+      ) : (
+        <div className="flow-grid">
+          {cards.map(card=>(
+            <div key={card.key} className={`flow-card ${card.status}`}>
+              <div className="flow-step">
+                <span>{card.step}</span>
+                <span className={`flow-badge ${card.status}`}>{badgeLabel(card.status)}</span>
+              </div>
+              <h3>{card.title}</h3>
+              <p>{card.desc}</p>
+              <div className="meta">{card.meta}</div>
+              <div className="flow-actions">{card.action}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1127,13 +881,24 @@ function DayView({ personnel, types, dateStr, getCount, update, dayHours, showDi
 }
 
 /* ═══ Week View ═════════════════════════════════════════════════════════════ */
-function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, showDiff, getTplCount, template }) {
-  if (!personnel.length) return (
-    <div className="empty"><div className="icon">👥</div><p>暂无人员，请先导入</p></div>
-  );
+function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, showDiff, getTplCount, template, records, update, weekMode, setWeekMode }) {
   const wTotal = (pid) => wDates.reduce((s,d)=>s+dayHours(fmt(d),pid), 0);
   const colTotal = (d) => personnel.reduce((s,p)=>s+dayHours(fmt(d),p.id), 0);
   const grandTotal = () => wDates.reduce((s,d)=>s+colTotal(d), 0);
+  const [activeDay, setActiveDay] = useState(0);
+  const [reviseQuery, setReviseQuery] = useState('');
+  const [revisePersonId, setRevisePersonId] = useState('');
+  const [reviseZoom, setReviseZoom] = useState(1);
+  const [selectedSlotKey, setSelectedSlotKey] = useState('');
+  const [slotOverrides, setSlotOverrides] = useState({});
+  const reviseTopScrollRef = useRef(null);
+  const reviseGridWrapRef = useRef(null);
+  const reviseInlineInputRef = useRef(null);
+  const revisionCacheKey = useMemo(()=>{
+    const weekStart = fmt(wDates[0] || new Date());
+    const tplKey = template?.name || 'no-template';
+    return `wh_revision_overrides::${tplKey}::${weekStart}`;
+  },[template?.name, fmt(wDates[0] || new Date())]);
 
   function goDay(d) { setCurDate(new Date(d)); setView('day'); }
 
@@ -1146,6 +911,450 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
       const t = types.find(t=>t.name===tn);
       return s + (t ? cnt*t.hours : 0);
     }, 0);
+  }
+
+  useEffect(()=>{
+    setReviseQuery('');
+    setRevisePersonId('');
+  },[activeDay]);
+
+  useEffect(()=>{
+    setSelectedSlotKey('');
+    setReviseQuery('');
+    setRevisePersonId('');
+    setSlotOverrides(()=>{
+      if (!template) return {};
+      return loadLS(revisionCacheKey, {});
+    });
+  },[template, revisionCacheKey]);
+
+  useEffect(()=>{
+    if (!template) return;
+    localStorage.setItem(revisionCacheKey, JSON.stringify(slotOverrides || {}));
+  },[template, revisionCacheKey, slotOverrides]);
+
+  useEffect(()=>{
+    if (selectedSlotKey && reviseInlineInputRef.current) reviseInlineInputRef.current.focus();
+  },[selectedSlotKey]);
+
+  const reviseCandidates = useMemo(()=>{
+    const source = reviseQuery.trim()
+      ? personnel.filter(p=>matchSearch(p.name, reviseQuery.trim()))
+      : personnel;
+    return source.slice(0, 18);
+  },[personnel, reviseQuery]);
+
+  const personIndex = useMemo(()=>Object.fromEntries(personnel.map(p=>[p.name, p])), [personnel]);
+  const typeIndexByName = useMemo(()=>Object.fromEntries(types.map(t=>[t.name, t])), [types]);
+  const previewMeta = template?.preview || null;
+  const previewSlotEntries = useMemo(()=>{
+    if (!previewMeta?.cellSlotMap) return [];
+    return Object.entries(previewMeta.cellSlotMap)
+      .map(([key, slot])=>{
+        const [r, c] = key.split(',').map(Number);
+        return { key, r, c, ...slot };
+      })
+      .sort((a,b)=>a.r-b.r || a.c-b.c);
+  },[previewMeta]);
+
+  const slotAssignments = useMemo(()=>{
+    if (!previewSlotEntries.length) return { byKey:{}, extrasByDay:{} };
+    const baselinePools = {};
+    Object.entries(template?.data || {}).forEach(([wd, dayMap])=>{
+      baselinePools[wd] = baselinePools[wd] || {};
+      Object.entries(dayMap || {}).forEach(([personName, typeMap])=>{
+        Object.entries(typeMap || {}).forEach(([typeName, cnt])=>{
+          baselinePools[wd][typeName] = baselinePools[wd][typeName] || [];
+          for (let i=0; i<(cnt || 0); i++) baselinePools[wd][typeName].push(personName);
+        });
+      });
+      Object.values(baselinePools[wd]).forEach(arr=>arr.sort((a,b)=>a.localeCompare(b, 'zh')));
+    });
+    const byKey = {};
+    for (const slot of previewSlotEntries) {
+      const baseQueue = baselinePools[slot.weekday]?.[slot.typeName] || [];
+      const baselinePerson = baseQueue.length ? baseQueue.shift() : null;
+      const override = slotOverrides[slot.key];
+      let currentPerson, state;
+      if (override === 'empty') {
+        currentPerson = null;
+        state = 'removed';
+      } else if (typeof override === 'string') {
+        currentPerson = override;
+        state = override === baselinePerson ? 'original' : 'changed';
+      } else {
+        currentPerson = baselinePerson;
+        state = baselinePerson ? 'original' : 'empty';
+      }
+      byKey[slot.key] = { ...slot, baselinePerson, currentPerson, state };
+    }
+
+    const slotConsumed = {};
+    Object.values(byKey).forEach(slot=>{
+      if (!slot.currentPerson) return;
+      slotConsumed[slot.weekday] = slotConsumed[slot.weekday] || {};
+      slotConsumed[slot.weekday][slot.typeName] = slotConsumed[slot.weekday][slot.typeName] || [];
+      slotConsumed[slot.weekday][slot.typeName].push(slot.currentPerson);
+    });
+
+    const recordCounts = {};
+    wDates.forEach((d, wd)=>{
+      const dayRec = records?.[fmt(d)] || {};
+      types.forEach(t=>{
+        personnel.forEach(p=>{
+          const cnt = dayRec[p.id]?.[t.id] || 0;
+          if (!cnt) return;
+          recordCounts[wd] = recordCounts[wd] || {};
+          recordCounts[wd][t.name] = recordCounts[wd][t.name] || {};
+          recordCounts[wd][t.name][p.name] = (recordCounts[wd][t.name][p.name] || 0) + cnt;
+        });
+      });
+    });
+
+    const extrasByDay = {};
+    Object.entries(recordCounts).forEach(([wd, typeMap])=>{
+      Object.entries(typeMap).forEach(([typeName, personMap])=>{
+        Object.entries(personMap).forEach(([personName, cnt])=>{
+          const consumed = (slotConsumed[wd]?.[typeName] || []).filter(name=>name===personName).length;
+          const extra = cnt - consumed;
+          if (extra <= 0) return;
+          extrasByDay[wd] = extrasByDay[wd] || [];
+          extrasByDay[wd].push({ personName, typeName, count: extra });
+        });
+      });
+    });
+    return { byKey, extrasByDay };
+  },[previewSlotEntries, slotOverrides, wDates, records, types, personnel, template]);
+
+  if (!personnel.length) return (
+    <div className="empty"><div className="icon">👥</div><p>暂无人员，请先导入</p></div>
+  );
+
+  function removeByNames(dateStr, personName, typeName, count=1) {
+    const person = personIndex[personName];
+    const type = typeIndexByName[typeName];
+    if (!person || !type) return;
+    for (let i=0; i<count; i++) update(dateStr, person.id, type.id, -1);
+  }
+
+  function addByNames(dateStr, personName, typeName, count=1) {
+    const person = personIndex[personName];
+    const type = typeIndexByName[typeName];
+    if (!person || !type) return;
+    for (let i=0; i<count; i++) update(dateStr, person.id, type.id, 1);
+  }
+
+  function handleRevisionSlotClick(slot) {
+    const dateStr = fmt(wDates[slot.weekday]);
+    setActiveDay(slot.weekday);
+    if (selectedSlotKey === slot.key) {
+      if (slot.currentPerson) removeByNames(dateStr, slot.currentPerson, slot.typeName, 1);
+      if (slot.baselinePerson) addByNames(dateStr, slot.baselinePerson, slot.typeName, 1);
+      setSlotOverrides(prev=>{ const next = {...prev}; delete next[slot.key]; return next; });
+      setSelectedSlotKey('');
+      return;
+    }
+
+    if (slot.currentPerson) {
+      removeByNames(dateStr, slot.currentPerson, slot.typeName, 1);
+      setSlotOverrides(prev=>({...prev, [slot.key]:'empty'}));
+      setSelectedSlotKey('');
+      return;
+    }
+
+    setSelectedSlotKey(slot.key);
+    setReviseQuery('');
+    setRevisePersonId('');
+  }
+
+  function addReplacementToSelectedSlot(personId = revisePersonId) {
+    if (!selectedSlotKey || !personId) return;
+    const slot = slotAssignments.byKey[selectedSlotKey];
+    const targetPerson = personnel.find(p=>p.id===personId);
+    if (!slot || !targetPerson) return;
+    const dateStr = fmt(wDates[slot.weekday]);
+    const targetTypeName = slot.typeName;
+    if (slot.currentPerson) {
+      removeByNames(dateStr, slot.currentPerson, targetTypeName, 1);
+    }
+    addByNames(dateStr, targetPerson.name, targetTypeName, 1);
+    setSlotOverrides(prev=>({...prev, [selectedSlotKey]: targetPerson.name}));
+    setSelectedSlotKey('');
+    setReviseQuery('');
+    setRevisePersonId('');
+  }
+
+  if (weekMode === 'revise') {
+    const selectedSlot = slotAssignments.byKey[selectedSlotKey];
+
+    if (!previewMeta?.rawGrid || !previewSlotEntries.length) {
+      return (
+        <div className="week-revision-shell">
+          <div className="empty" style={{border:'1px solid var(--border)',borderRadius:16,background:'var(--surface)'}}>
+            <div className="icon">🗂</div>
+            <p>当前模板不含原始视图数据，无法进入原始 Excel 修订模式。</p>
+          </div>
+          <div className="rule-block" style={{marginBottom:0}}>
+            <div className="rule-block-title">
+              <strong>周修订模式</strong>
+              <span style={{fontSize:'11px',color:'var(--muted)'}}>当前模板不带原始视图，请重新通过“排班转模板”生成一次模板。</span>
+            </div>
+            <div className="week-revision-form-row">
+              <button className="btn" onClick={()=>setWeekMode('stats')}>回到周统计</button>
+              <button className="btn" onClick={()=>goDay(wDates[activeDay])}>切到按天</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const mergeStarts = {};
+    const mergeSkips = new Set();
+    const mergedRows = new Set();
+    const merges = previewMeta.rawMerges || [];
+    const rawGrid = previewMeta.rawGrid || [];
+    let maxR = rawGrid.length - 1;
+    let maxC = (rawGrid[0]?.length || 1) - 1;
+    for (const m of merges) {
+      const rowSpan = m.e.r - m.s.r + 1;
+      const colSpan = m.e.c - m.s.c + 1;
+      mergeStarts[`${m.s.r},${m.s.c}`] = { rowSpan, colSpan };
+      for (let rr=m.s.r; rr<=m.e.r; rr++) {
+        mergedRows.add(rr);
+        for (let cc=m.s.c; cc<=m.e.c; cc++) {
+          if (rr===m.s.r && cc===m.s.c) continue;
+          mergeSkips.add(`${rr},${cc}`);
+        }
+      }
+    }
+    const HEADER_KW_VALS = new Set(['签到','楼层','负责人','值班','洗板擦布','洗抹布','洗板','时间']);
+    const displayRows = [];
+    let blankRun = [];
+    const flushBlankRun = () => {
+      if (!blankRun.length) return;
+      if (blankRun.length > 5) {
+        blankRun.slice(0,2).forEach(r=>displayRows.push({type:'row', r}));
+        displayRows.push({type:'collapsed', count: blankRun.length - 4});
+        blankRun.slice(-2).forEach(r=>displayRows.push({type:'row', r}));
+      } else blankRun.forEach(r=>displayRows.push({type:'row', r}));
+      blankRun = [];
+    };
+    for (let r=0; r<=maxR; r++) {
+      const rowHasData = Array.from({length:maxC+1},(_,cc)=>rawGrid[r]?.[cc]?.val).some(Boolean);
+      const collapsibleBlank = !rowHasData && !mergedRows.has(r);
+      if (collapsibleBlank) blankRun.push(r);
+      else { flushBlankRun(); displayRows.push({type:'row', r}); }
+    }
+    flushBlankRun();
+
+    function excelColName(idx) {
+      let n = idx + 1;
+      let s = '';
+      while (n > 0) {
+        const rem = (n - 1) % 26;
+        s = String.fromCharCode(65 + rem) + s;
+        n = Math.floor((n - 1) / 26);
+      }
+      return s;
+    }
+    function withAlpha(color, alpha='22') {
+      if (!color) return null;
+      if (color.startsWith('#') && color.length === 7) return `${color}${alpha}`;
+      return color;
+    }
+    const colWidths = Array.from({length:maxC+1}, (_,cc)=>{
+      let longest = excelColName(cc).length;
+      for (const row of displayRows) {
+        if (row.type !== 'row') continue;
+        if (mergeSkips.has(`${row.r},${cc}`)) continue;
+        const span = mergeStarts[`${row.r},${cc}`];
+        if (span?.colSpan > 1) continue;
+        longest = Math.max(longest, String(rawGrid[row.r]?.[cc]?.val || '').length);
+      }
+      return Math.max(72, Math.min(240, longest * 11 + 24));
+    });
+    const tableWidth = 48 + colWidths.reduce((s, w)=>s+w, 0);
+
+    function getSlotCellView(key, defaultVal) {
+      const slot = slotAssignments.byKey[key];
+      if (!slot) {
+        if (previewMeta.cellMatchType?.[key] === 'type') {
+          const hitType = types.find(t=>t.name===previewMeta.cellTypeName?.[key]);
+          return {
+            label: defaultVal,
+            style: hitType ? { background:withAlpha(hitType.color,'18'), color:hitType.color, border:`1px solid ${withAlpha(hitType.color,'66')}`, fontWeight:700 } : {},
+            className:'',
+            clickable:false,
+          };
+        }
+        if (previewMeta.cellMatchType?.[key] === 'unmatched') {
+          return { label:defaultVal, style:{background:'var(--yellow)18', color:'var(--yellow)', border:'1px solid var(--yellow)'}, className:'', clickable:false };
+        }
+        if (HEADER_KW_VALS.has(defaultVal)) {
+          return { label:defaultVal, style:{background:'var(--surface2)', color:'var(--muted)', fontStyle:'italic'}, className:'', clickable:false };
+        }
+        return { label:defaultVal, style:{}, className:'', clickable:false };
+      }
+      const hitType = typeIndexByName[slot.typeName];
+      const isSelected = selectedSlotKey === key;
+      const displayName = slot.currentPerson || '';
+      const isChanged = slot.state === 'changed';
+      const isRemoved = slot.state === 'removed';
+      const className = `week-revision-grid-cell${isRemoved?' removed':''}${showDiff && isChanged?' changed':''}${isSelected?' selected':''}`;
+      const style = hitType ? {
+        background: slot.currentPerson ? withAlpha(hitType.color,'22') : 'rgba(248,81,73,.08)',
+        color: slot.currentPerson ? hitType.color : 'var(--red)',
+        border: `1px solid ${withAlpha(hitType.color,'88')}`,
+        fontWeight:700,
+      } : {};
+      let hint;
+      if (isSelected) hint = '再次点击：恢复模板原数据';
+      else if (slot.currentPerson) hint = `点击清空「${slot.currentPerson}」`;
+      else hint = '点击选中此槽位，直接在当前位置搜索替补人员';
+      return { label:displayName, style, className, clickable:true, slot, hint, isSelected };
+    }
+
+    return (
+      <div className="week-revision-shell">
+        <div className="rule-block" style={{marginBottom:0}}>
+          <div className="rule-block-title">
+            <strong>原始视图修订</strong>
+            <span style={{fontSize:'11px',color:'var(--muted)'}}>与原 Excel 布局一致；第 1 下删除原人名，第 2 下选中待替换，第 3 下恢复模板原数据</span>
+          </div>
+          <div className="preview-toolbar">
+            <button className="btn btn-sm" onClick={()=>setReviseZoom(z=>Math.max(0.6, +(z - 0.1).toFixed(2)))}>缩小</button>
+            <span className="zoom-label">{Math.round(reviseZoom * 100)}%</span>
+            <button className="btn btn-sm" onClick={()=>setReviseZoom(z=>Math.min(2, +(z + 0.1).toFixed(2)))}>放大</button>
+            <button className="btn btn-sm" onClick={()=>setReviseZoom(1)}>重置</button>
+            <button className="btn btn-sm" onClick={()=>goDay(wDates[activeDay])}>切到按天</button>
+            <button className="btn btn-sm" onClick={()=>setWeekMode('stats')}>回到周统计</button>
+            <span className={`flow-badge ${showDiff ? 'active' : 'todo'}`}>{showDiff ? '差异已显示' : '可打开差异'}</span>
+            <span style={{fontSize:'11px',color:'var(--muted)'}}>
+              替换边框会随主题切换：深色主题用白框，浅色主题用黑框；空红框表示该槽位已被清空等待补人。点第 2 下后，搜索框会直接出现在槽位位置。
+            </span>
+          </div>
+          <div
+            className="raw-grid-scroll-top"
+            ref={reviseTopScrollRef}
+            onScroll={e=>{ if (reviseGridWrapRef.current && reviseGridWrapRef.current.scrollLeft !== e.currentTarget.scrollLeft) reviseGridWrapRef.current.scrollLeft = e.currentTarget.scrollLeft; }}
+          >
+            <div style={{width:tableWidth * reviseZoom, height:1}} />
+          </div>
+          <div
+            className="raw-grid-wrap raw-grid-wrap-lg"
+            ref={reviseGridWrapRef}
+            onScroll={e=>{ if (reviseTopScrollRef.current && reviseTopScrollRef.current.scrollLeft !== e.currentTarget.scrollLeft) reviseTopScrollRef.current.scrollLeft = e.currentTarget.scrollLeft; }}
+            style={{maxHeight:'calc(100vh - 250px)'}}
+          >
+            <div style={{zoom:reviseZoom}}>
+            <table className="raw-grid">
+              <colgroup>
+                <col style={{width:48}} />
+                {colWidths.map((w, idx)=><col key={idx} style={{width:w}} />)}
+              </colgroup>
+              <thead>
+                <tr>
+                  <th className="row-hdr">#</th>
+                  {Array.from({length:maxC+1},(_,i)=><th key={i}>{excelColName(i)}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {displayRows.map((row, idx)=> row.type === 'collapsed' ? (
+                  <tr key={`collapsed-${idx}`}>
+                    <td className="row-hdr">…</td>
+                    <td className="cell-collapsed" colSpan={maxC+1}>已折叠 {row.count} 行连续空白行</td>
+                  </tr>
+                ) : (
+                  <tr key={row.r}>
+                    <td className="row-hdr">{row.r+1}</td>
+                    {Array.from({length:maxC+1},(_,cc)=>{
+                      const key = `${row.r},${cc}`;
+                      if (mergeSkips.has(key)) return null;
+                      const span = mergeStarts[key];
+                      const val = rawGrid[row.r]?.[cc]?.val || '';
+                      const viewInfo = getSlotCellView(key, val);
+                      const wd = viewInfo.slot?.weekday;
+                      const isActiveDay = typeof wd === 'number' && wd === activeDay;
+                      return (
+                        <td
+                          key={cc}
+                          rowSpan={span?.rowSpan}
+                          colSpan={span?.colSpan}
+                          className={viewInfo.className + (isActiveDay ? ' active-day' : '')}
+                          style={viewInfo.style}
+                          title={viewInfo.hint || (viewInfo.slot ? `${WD[viewInfo.slot.weekday]} · ${viewInfo.slot.typeName}` : val)}
+                          onClick={viewInfo.clickable ? ()=>handleRevisionSlotClick(viewInfo.slot) : undefined}
+                        >
+                          <div className="week-slot-cell-inner">
+                            {viewInfo.label}
+                            {viewInfo.isSelected && (
+                              <div className="week-slot-editor" onClick={e=>e.stopPropagation()}>
+                                <div className="week-slot-editor-head">
+                                  <strong>{WD[viewInfo.slot.weekday]} · {viewInfo.slot.typeName}</strong>
+                                  <span>模板：{viewInfo.slot.baselinePerson || '空槽位'}</span>
+                                </div>
+                                <input
+                                  ref={reviseInlineInputRef}
+                                  className="inp"
+                                  value={reviseQuery}
+                                  placeholder={`输入替补人员，可搜姓名 / 拼音首字母`}
+                                  onChange={e=>{
+                                    setReviseQuery(e.target.value);
+                                    setRevisePersonId('');
+                                  }}
+                                  onKeyDown={e=>{
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      const exact = reviseCandidates.find(p=>p.name===reviseQuery.trim());
+                                      const fallback = reviseCandidates[0];
+                                      const chosen = exact || fallback;
+                                      if (chosen) addReplacementToSelectedSlot(chosen.id);
+                                    } else if (e.key === 'Escape') {
+                                      e.preventDefault();
+                                      setSelectedSlotKey('');
+                                      setReviseQuery('');
+                                      setRevisePersonId('');
+                                    }
+                                  }}
+                                />
+                                <div className="week-slot-editor-suggestions">
+                                  {reviseCandidates.map(p=>(
+                                    <button
+                                      type="button"
+                                      key={p.id}
+                                      className={`week-slot-editor-chip${revisePersonId===p.id?' active':''}`}
+                                      onClick={()=>{
+                                        setRevisePersonId(p.id);
+                                        addReplacementToSelectedSlot(p.id);
+                                      }}
+                                    >
+                                      {p.name}
+                                    </button>
+                                  ))}
+                                  {!reviseCandidates.length && <span className="week-slot-editor-empty">没有匹配人员</span>}
+                                </div>
+                                <div className="week-slot-editor-actions">
+                                  <button className="btn btn-sm" onClick={()=>{
+                                    setSelectedSlotKey('');
+                                    setReviseQuery('');
+                                    setRevisePersonId('');
+                                  }}>取消</button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -1342,19 +1551,33 @@ function PeopleModal({ personnel, setPersonnel, close }) {
 }
 
 /* ═══ Export Modal ══════════════════════════════════════════════════════════ */
-function ExportModal({ onExport, allDates, close }) {
+function ExportModal({ onExport, allDates, close, personnel, dayHours }) {
   const [sel, setSel]       = useState('both');
+  const [previewMode, setPreviewMode] = useState('day');
   const [rangeType, setRangeType] = useState('all'); // 'all' | 'custom'
   const minDate = allDates[0] || '';
   const maxDate = allDates[allDates.length-1] || '';
   const [startDate, setStartDate] = useState(minDate);
   const [endDate,   setEndDate]   = useState(maxDate);
+  const [bonusHours, setBonusHours] = useState({});
 
   const filtered = rangeType==='all' ? allDates
     : allDates.filter(d=>d>=startDate && d<=endDate);
+  const weekMap = useMemo(()=>{
+    const map = {};
+    for (const d of filtered) {
+      const mon = getMonday(new Date(d));
+      const key = fmt(mon);
+      const sun = addDays(mon, 6);
+      if (!map[key]) map[key] = { label:`${fmtMid(mon)}~${fmtMid(sun)}`, dates:[] };
+      map[key].dates.push(d);
+    }
+    return map;
+  },[filtered]);
+  const weekKeys = Object.keys(weekMap).sort();
 
   function go() {
-    onExport(sel, rangeType==='all'?null:startDate, rangeType==='all'?null:endDate);
+    onExport(sel, rangeType==='all'?null:startDate, rangeType==='all'?null:endDate, bonusHours);
     close();
   }
 
@@ -1363,9 +1586,58 @@ function ExportModal({ onExport, allDates, close }) {
     background:'var(--bg)',color:'var(--text)',fontSize:'12px',fontFamily:'inherit',outline:'none'
   };
 
+  function setBonus(pid, val) {
+    setBonusHours(prev=>({...prev, [pid]: val}));
+  }
+
+  function renderPreviewTable(mode) {
+    const cols = mode === 'day'
+      ? filtered.map(d=>({ key:d, label:d.slice(5), getValue:pid=>dayHours(d,pid) }))
+      : weekKeys.map(k=>({ key:k, label:weekMap[k].label, getValue:pid=>weekMap[k].dates.reduce((s,d)=>s+dayHours(d,pid),0) }));
+    return (
+      <div className="sched-table-wrap" style={{maxHeight:'260px', marginTop:'10px'}}>
+        <table className="sched-table">
+          <thead>
+            <tr>
+              <th style={{position:'sticky',left:0,zIndex:3}}>姓名</th>
+              {cols.map(col=><th key={col.key}>{col.label}</th>)}
+              <th>奖励工时</th>
+              <th>总计</th>
+            </tr>
+          </thead>
+          <tbody>
+            {personnel.map(p=>{
+              const values = cols.map(col=>col.getValue(p.id));
+              const total = values.reduce((s,v)=>s+v,0);
+              const bonus = parseFloat(bonusHours[p.id]) || 0;
+              return (
+                <tr key={p.id}>
+                  <td className="col-name" style={{position:'sticky',left:0,zIndex:1}}>{p.name}</td>
+                  {values.map((v, idx)=><td key={idx}>{v ? v.toFixed(1) : '—'}</td>)}
+                  <td>
+                    <input
+                      className="inp inp-sm"
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      value={bonusHours[p.id] ?? ''}
+                      placeholder="0"
+                      onChange={e=>setBonus(p.id, e.target.value)}
+                    />
+                  </td>
+                  <td style={{fontWeight:700,color:'var(--yellow)'}}>{(total + bonus).toFixed(1)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
   return (
     <div className="overlay" onClick={e=>e.target===e.currentTarget&&close()}>
-      <div className="modal" style={{width:400}}>
+      <div className="modal" style={{width:'min(1120px, 94vw)'}}>
         <div className="modal-title">📊 导出 Excel <button className="close" onClick={close}>✕</button></div>
 
         {/* Content type */}
@@ -1415,7 +1687,20 @@ function ExportModal({ onExport, allDates, close }) {
         </div>
 
         <div style={{fontSize:'11px',color:'var(--muted)',marginBottom:'14px'}}>
-          导出文件包含「工时明细」表可重新导入
+          导出前可先在预览里补奖励工时。奖励工时会出现在按天 / 按周统计表的总计前一列。
+        </div>
+        <div className="rule-block" style={{marginBottom:'14px'}}>
+          <div className="rule-block-title">
+            <strong>导出预览</strong>
+            <div className="week-mode-toggle">
+              <button className={previewMode==='day'?'active':''} onClick={()=>setPreviewMode('day')}>按天预览</button>
+              <button className={previewMode==='week'?'active':''} onClick={()=>setPreviewMode('week')}>按周预览</button>
+            </div>
+          </div>
+          <div style={{fontSize:'11px',color:'var(--muted)'}}>
+            当前预览会按所选时间范围展示每列工时，奖励工时可单独录入，不会写回日常记录，只影响本次导出。
+          </div>
+          {renderPreviewTable(previewMode)}
         </div>
         <div style={{display:'flex',justifyContent:'flex-end',gap:'8px'}}>
           <button className="btn" onClick={close}>取消</button>
@@ -1676,278 +1961,34 @@ function CalendarPicker({ curDate, setCurDate, view, records, dateLabel, isHighl
 /* ═══ Schedule Import Modal ═════════════════════════════════════════════════ */
 
 /* ── Pure parsing logic (no React) ── */
-function normStr(s) {
-  if (s == null) return '';
-  return String(s).replace(/：/g,':').replace(/[－—\u2014\u2013]/g,'-').replace(/\s+/g,' ').trim();
-}
-
-function parseTimeMins(label) {
-  const s = normStr(label);
-  const m = s.match(/(\d{1,2}):(\d{2})\s*[-~]\s*(\d{1,2}):(\d{2})/);
-  if (!m) return null;
-  let start = parseInt(m[1])*60+parseInt(m[2]);
-  let end   = parseInt(m[3])*60+parseInt(m[4]);
-  if (end <= start) end += 24*60;
-  return end - start;
-}
-
-// Type labels that explicitly map to 1h (shortest type)
-const ONE_HOUR_LABELS = new Set(['负责人','晚上值日','值日','巡视','夜巡','值守']);
-
-function classifyByTypes(label, types) {
-  const s = normStr(label);
-  const shortest = () => [...types].sort((a,b)=>a.hours-b.hours)[0] || null;
-  // Explicit 1h labels (负责人, 晚上值日, etc.)
-  if (ONE_HOUR_LABELS.has(s) || ONE_HOUR_LABELS.has(label)) return shortest();
-  // Type d: pure weekday with no time → 1h
-  if (extractWeekday(s) !== null && !/\d{1,2}:\d{2}/.test(s)) return shortest();
-  // Type a/b/e: contains a time range → match by duration
-  const mins = parseTimeMins(s);
-  if (mins != null && mins > 0) {
-    let best=null, bestDiff=Infinity;
-    for (const t of types) {
-      const d = Math.abs(t.hours - mins/60);
-      if (d < bestDiff) { bestDiff=d; best=t; }
-    }
-    if (best && bestDiff <= 0.65) return best;
-  }
-  // Fallback: keyword contains type name
-  for (const t of [...types].sort((a,b)=>b.hours-a.hours)) {
-    if (s.includes(t.name)) return t;
-  }
-  return shortest();
-}
-
-const WD_MAP_TABLE = [
-  [['星期一','周一'],0],[['星期二','周二'],1],[['星期三','周三'],2],
-  [['星期四','周四'],3],[['星期五','周五'],4],[['星期六','周六'],5],
-  [['星期日','周日','星期天','周天'],6],
-];
-function extractWeekday(s) {
-  if (!s) return null;
-  const n = normStr(s);
-  for (const [keys, wd] of WD_MAP_TABLE) {
-    for (const k of keys) {
-      if (n.startsWith(k) || n === k) return wd;
-    }
-  }
-  return null;
-}
-
-const HEADER_KW_SET = new Set(['签到','楼层','负责人','值班','洗板擦布','洗抹布','洗板']);
-// Match exact set OR anything starting with "洗"（洗抹布/洗板擦布 etc）
-function isHeaderKW(s) {
-  if (!s) return false;
-  return HEADER_KW_SET.has(s) || s.startsWith('洗');
-}
-// Keep HEADER_KW as alias for Set-style usage in isPersonName
-const HEADER_KW = HEADER_KW_SET;
-const SKIP_NAMES = new Set(['无需值日','无需值班','无','时间','综合楼','s1楼','负责人','楼层','值班组','巡视组','周一','周二','周三','周四','周五','周六','周日','周天','星期一','星期二','星期三','星期四','星期五','星期六','星期日','星期天']);
-
-function isPersonName(s) {
-  if (!s) return false;
-  const t = normStr(s).toLowerCase();
-  if (!t) return false;
-  if (SKIP_NAMES.has(t)) return false;
-  if (SKIP_NAMES.has(s)) return false;
-  if (/^\d+$/.test(t)) return false;     // pure number
-  if (t.length > 12) return false;        // too long
-  if (isHeaderKW(s) || [...HEADER_KW].some(kw=>t.includes(kw))) return false;
-  const BAD = ['排班','安排','校历','周末','巡视','综合楼','s1楼','值班组','巡视组'];
-  if (BAD.some(k => t.includes(k))) return false;
-  // Reject time-range strings and pure weekday names
-  if (/\d{1,2}:\d{2}/.test(normStr(s))) return false;
-  const cjk = (s.match(/[\u4e00-\u9fff]/g)||[]).length;
-  return cjk >= 1;
-}
-
-function buildGrid(ws) {
-  // Expand merged cells; returns getCellFn(row0, col0) → string|null (0-indexed)
-  const mergeVals = {};
-  for (const m of (ws['!merges']||[])) {
-    const topLeft = ws[XLSX.utils.encode_cell({r:m.s.r, c:m.s.c})];
-    const val = topLeft?.v != null ? normStr(String(topLeft.v)) : null;
-    for (let r=m.s.r; r<=m.e.r; r++)
-      for (let cc=m.s.c; cc<=m.e.c; cc++)
-        mergeVals[`${r},${cc}`] = val;
-  }
-  return function(r, cc) {
-    const key = `${r},${cc}`;
-    if (key in mergeVals) return mergeVals[key] || null;
-    const cell = ws[XLSX.utils.encode_cell({r, c:cc})];
-    return cell?.v != null ? normStr(String(cell.v)) : null;
-  };
-}
-
-function getSheetDims(ws) {
-  const ref = ws['!ref'];
-  if (!ref) return {maxR:0, maxC:0};
-  const rng = XLSX.utils.decode_range(ref);
-  return {maxR: rng.e.r, maxC: rng.e.c};
-}
-
-function parseScheduleSheetNew(ws, types, personnel, extraRules) {
-  const G = buildGrid(ws);
-  const {maxR, maxC} = getSheetDims(ws);
-
-  function tryMatch(rawName) {
-    if (!rawName) return null;
-    const check = (name) => {
-      let p = personnel.find(p => p.name === name);
-      if (p) return p;
-      const part = name.split(/[·•]/)[0].trim();
-      p = personnel.find(p => p.name === part || p.name.startsWith(part) || part.startsWith(p.name));
-      if (p) return p;
-      if (part.length >= 2) p = personnel.find(p => p.name.includes(part) || part.includes(p.name));
-      return p || null;
-    };
-    if (extraRules[rawName]) return check(extraRules[rawName]);
-    return check(rawName);
-  }
-
-  // Safe read: falls back left up to 2 cells for non-topleft merged cells
-  function Gsafe(r, cc) {
-    const v = G(r, cc);
-    if (v != null) return v;
-    if (cc > 0) { const v1 = G(r, cc-1); if (v1 != null) return v1; }
-    if (cc > 1) { const v2 = G(r, cc-2); if (v2 != null) return v2; }
-    return null;
-  }
-
-  // Normalize typeCol to the merge top-left in the header row
-  function normTypeCol(hr, col) {
-    const val = G(hr, col);
-    if (!val) return col;
-    let left = col;
-    while (left > 0 && G(hr, left-1) === val) left--;
-    return left;
-  }
-
-  // ── 1. Find 签到 header rows ──────────────────────────────────────────
-  const signRowSet = new Set();
-  for (let r=0; r<=maxR; r++)
-    for (let cc=0; cc<=maxC; cc++)
-      if (G(r,cc) === '签到') signRowSet.add(r);
-  const signRows = [...signRowSet].sort((a,b)=>a-b);
-  if (signRows.length === 0) return {error:'未找到包含「签到」的表头行'};
-
-  const result = {};
-  const unmatchedSet = new Set();
-  const signRowsExt = [...signRows, maxR+1];
-
-  for (let si=0; si<signRows.length; si++) {
-    const hr        = signRows[si];
-    const dataStart = hr + 1;
-    const dataEnd   = signRowsExt[si+1] - 2;
-    if (dataStart > dataEnd) continue;
-
-    // ── 2a. Deduplicate sign_cols: keep first of each consecutive run ──
-    const rawSC = [];
-    for (let cc=0; cc<=maxC; cc++)
-      if (G(hr,cc) === '签到') rawSC.push(cc);
-    const signCols = [];
-    let runEnd = -2;
-    for (const cc of rawSC) {
-      if (cc > runEnd+1) signCols.push(cc);
-      runEnd = cc;
-    }
-
-    // ── 2b. Build groups ──────────────────────────────────────────────
-    const groups = [];
-    for (const sc of signCols) {
-      let foundWd = null, foundWdCol = -1;
-      // Scan left from sign col to find weekday header
-      for (let cc=sc-1; cc>=0; cc--) {
-        const cv = G(hr, cc);
-        if (!cv) continue;
-        if (isHeaderKW(cv)) continue;
-        const wd = extractWeekday(cv);
-        if (wd !== null) { foundWd=wd; foundWdCol=cc; break; }
-        if (cv === '时间') continue;
-        break;
-      }
-
-      let pcols;
-      if (foundWdCol >= 0) {
-        // Standard weekday-column block: extend left through merged header
-        const wdVal = G(hr, foundWdCol);
-        let leftBound = foundWdCol;
-        while (leftBound > 0 && G(hr, leftBound-1) === wdVal) leftBound--;
-        pcols = [];
-        for (let cc=leftBound; cc<sc; cc++) pcols.push(cc);
-      } else {
-        // Section-3 style: date/type lives in the data cell itself (e.g. 周一, 周六7:30-9:30)
-        // Find typeCol = rightmost '时间' to the left, skipping all separator keywords
-        let typeColR = 0;
-        for (let cc=sc-1; cc>=0; cc--) {
-          const cv = G(hr, cc);
-          if (!cv) continue;
-          if (cv === '时间') { typeColR = cc; break; }
-          if (isHeaderKW(cv)) continue;
-          if (extractWeekday(cv) !== null) { typeColR = cc; break; }
-          typeColR = cc; break;
-        }
-        pcols = [];
-        for (let cc=typeColR+1; cc<sc; cc++) pcols.push(cc);
-      }
-
-      // typeCol: scan left from first pcol to find '时间' source column,
-      // then normalize to the merge top-left so data-row lookups hit the actual cell
-      let typeCol = 0;
-      if (pcols.length > 0) {
-        const firstP = pcols[0];
-        for (let cc=firstP-1; cc>=0; cc--) {
-          const cv = G(hr, cc);
-          if (!cv) continue;
-          if (cv === '时间') { typeCol = normTypeCol(hr, cc); break; }
-          if (isHeaderKW(cv)) continue;
-          if (extractWeekday(cv) !== null) continue;
-          typeCol = normTypeCol(hr, cc); break;
-        }
-      }
-
-      groups.push({wd: foundWd, pcols, typeCol, sc});
-    }
-
-    // ── 2c. Process data rows ─────────────────────────────────────────
-    for (let r=dataStart; r<=dataEnd; r++) {
-      for (const grp of groups) {
-        const typeRaw = Gsafe(r, grp.typeCol);
-        if (!typeRaw) continue;
-        const typeNorm = normStr(typeRaw);
-
-        let wd = grp.wd;
-        if (wd === null) wd = extractWeekday(typeRaw);
-        if (wd === null) continue;
-
-        const wt = classifyByTypes(typeNorm, types);
-        if (!wt) continue;
-
-        const seen = new Set();
-        for (const cc of grp.pcols) {
-          const nm = G(r, cc);
-          if (!nm || seen.has(nm) || !isPersonName(nm)) continue;
-          seen.add(nm);
-          const pObj = tryMatch(nm);
-          if (pObj) {
-            result[wd] = result[wd]||{};
-            result[wd][pObj.name] = result[wd][pObj.name]||{};
-            result[wd][pObj.name][wt.name] = (result[wd][pObj.name][wt.name]||0)+1;
-          } else {
-            unmatchedSet.add(nm);
-          }
-        }
-      }
-    }
-  }
-
-  return {result, unmatched:[...unmatchedSet]};
-}
-
-/* ── PreviewTabs: summary + raw grid view ── */
-function PreviewTabs({ parseResult, personnel, types, WD_LABELS }) {
-  const [tab, setTab] = useState('summary'); // 'summary' | 'raw'
+function PreviewTabs({ parseResult, personnel, types, WD_LABELS, initialTab='summary' }) {
+  const [tab, setTab] = useState(initialTab); // 'summary' | 'raw'
+  const [zoom, setZoom] = useState(1);
   const cellMatchType = parseResult.cellMatchType || {};
+  const cellTypeName = parseResult.cellTypeName || {};
+  const rawWrapRef = useRef(null);
+  const rawTopScrollRef = useRef(null);
+  const [rawWrapWidth, setRawWrapWidth] = useState(0);
+
+  useEffect(()=>{
+    if (!rawWrapRef.current) return;
+    const el = rawWrapRef.current;
+    const update = ()=>setRawWrapWidth(el.clientWidth || 0);
+    update();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(update);
+      ro.observe(el);
+      return ()=>ro.disconnect();
+    }
+    window.addEventListener('resize', update);
+    return ()=>window.removeEventListener('resize', update);
+  },[tab]);
+
+  function withAlpha(color, alpha='33') {
+    if (!color) return null;
+    if (color.startsWith('#') && color.length === 7) return `${color}${alpha}`;
+    return color;
+  }
 
   // ── Legend colors
   const CELL_COLORS = {
@@ -1956,11 +1997,23 @@ function PreviewTabs({ parseResult, personnel, types, WD_LABELS }) {
     type:      {bg:'var(--accent)22', color:'var(--accent)', border:'var(--accent)55', label:'工时类型'},
   };
 
+  function excelColName(idx) {
+    let n = idx + 1;
+    let s = '';
+    while (n > 0) {
+      const rem = (n - 1) % 26;
+      s = String.fromCharCode(65 + rem) + s;
+      n = Math.floor((n - 1) / 26);
+    }
+    return s;
+  }
+
   // ── Raw grid renderer ───────────────────────────────────────────────────
   function RawGrid() {
     if (!parseResult.rawGrid) return <div style={{color:'var(--muted)',fontSize:'12px',padding:'20px',textAlign:'center'}}>原始表格数据不可用</div>;
 
     const grid = parseResult.rawGrid;
+    const merges = parseResult.rawMerges || [];
     // Trim trailing empty rows/cols for display
     let maxR = 0, maxC = 0;
     for (let r=0; r<grid.length; r++) {
@@ -1971,12 +2024,41 @@ function PreviewTabs({ parseResult, personnel, types, WD_LABELS }) {
     // Add a small buffer
     maxR = Math.min(maxR + 1, grid.length - 1);
     maxC = Math.min(maxC + 1, (grid[0]?.length || 1) - 1);
+    const mergeStarts = {};
+    const mergeSkips = new Set();
+    const mergedRows = new Set();
+    for (const m of merges) {
+      if (m.s.r > maxR || m.s.c > maxC) continue;
+      const rowSpan = Math.min(m.e.r, maxR) - m.s.r + 1;
+      const colSpan = Math.min(m.e.c, maxC) - m.s.c + 1;
+      mergeStarts[`${m.s.r},${m.s.c}`] = { rowSpan, colSpan };
+      for (let rr=m.s.r; rr<=Math.min(m.e.r,maxR); rr++) {
+        mergedRows.add(rr);
+        for (let cc=m.s.c; cc<=Math.min(m.e.c,maxC); cc++) {
+          if (rr===m.s.r && cc===m.s.c) continue;
+          mergeSkips.add(`${rr},${cc}`);
+        }
+      }
+    }
 
     const HEADER_KW_VALS = new Set(['签到','楼层','负责人','值班','洗板擦布','洗抹布','洗板','时间']);
 
     function cellStyle(r, cc) {
       const key = `${r},${cc}`;
       const mt = cellMatchType[key];
+      if (mt === 'matched') {
+        const typeName = cellTypeName[key];
+        const hitType = types.find(t=>t.name===typeName);
+        if (hitType) {
+          return {
+            background: withAlpha(hitType.color, '22'),
+            color: hitType.color,
+            border:`1px solid ${withAlpha(hitType.color, '88')}`,
+            fontWeight:700,
+            boxShadow:`inset 0 0 0 1px ${withAlpha(hitType.color, '44')}`
+          };
+        }
+      }
       if (mt && CELL_COLORS[mt]) {
         const col = CELL_COLORS[mt];
         return {background:col.bg, color:col.color, border:`1px solid ${col.border}`, fontWeight:600};
@@ -1987,27 +2069,93 @@ function PreviewTabs({ parseResult, personnel, types, WD_LABELS }) {
       return {};
     }
 
+    const displayRows = [];
+    let blankRun = [];
+    const flushBlankRun = () => {
+      if (!blankRun.length) return;
+      if (blankRun.length > 5) {
+        blankRun.slice(0,2).forEach(r=>displayRows.push({type:'row', r}));
+        displayRows.push({type:'collapsed', count: blankRun.length - 4});
+        blankRun.slice(-2).forEach(r=>displayRows.push({type:'row', r}));
+      } else {
+        blankRun.forEach(r=>displayRows.push({type:'row', r}));
+      }
+      blankRun = [];
+    };
+
+    for (let r=0; r<=maxR; r++) {
+      const rowHasData = Array.from({length:maxC+1},(_,cc)=>grid[r]?.[cc]?.val).some(Boolean);
+      const collapsibleBlank = !rowHasData && !mergedRows.has(r);
+      if (collapsibleBlank) blankRun.push(r);
+      else {
+        flushBlankRun();
+        displayRows.push({type:'row', r});
+      }
+    }
+    flushBlankRun();
+
+    const colWidths = Array.from({length:maxC+1}, (_,cc)=>{
+      let longest = excelColName(cc).length;
+      for (const row of displayRows) {
+        if (row.type !== 'row') continue;
+        if (mergeSkips.has(`${row.r},${cc}`)) continue;
+        const span = mergeStarts[`${row.r},${cc}`];
+        if (span?.colSpan > 1) continue;
+        const val = grid[row.r]?.[cc]?.val || '';
+        longest = Math.max(longest, String(val).length);
+      }
+      return Math.max(72, Math.min(260, longest * 11 + 26));
+    });
+    const rowHdrWidth = 48;
+    const totalWidth = colWidths.reduce((s,v)=>s+v,0) + rowHdrWidth;
+    const available = rawWrapWidth ? Math.max(320, rawWrapWidth - 8) : totalWidth;
+    const scale = totalWidth > available ? Math.max(0.52, available / totalWidth) : 1;
+    const fittedWidths = colWidths.map(w=>Math.max(56, Math.floor(w * scale)));
+    const fittedTotalWidth = fittedWidths.reduce((s, v)=>s+v, 0) + rowHdrWidth;
+
     return (
-      <div className="raw-grid-wrap">
+      <div ref={rawWrapRef}>
+        <div
+          className="raw-grid-scroll-top"
+          ref={rawTopScrollRef}
+          onScroll={e=>{ const el = e.currentTarget.nextElementSibling; if (el && el.scrollLeft !== e.currentTarget.scrollLeft) el.scrollLeft = e.currentTarget.scrollLeft; }}
+        >
+          <div style={{width:fittedTotalWidth, height:1}} />
+        </div>
+      <div className="raw-grid-wrap"
+        onScroll={e=>{ if (rawTopScrollRef.current && rawTopScrollRef.current.scrollLeft !== e.currentTarget.scrollLeft) rawTopScrollRef.current.scrollLeft = e.currentTarget.scrollLeft; }}>
+        <div style={{zoom}}>
         <table className="raw-grid">
+          <colgroup>
+            <col style={{width:rowHdrWidth}} />
+            {fittedWidths.map((w, idx)=><col key={idx} style={{width:w}} />)}
+          </colgroup>
           <thead>
             <tr>
               <th className="row-hdr">#</th>
               {Array.from({length:maxC+1},(_,i)=>(
-                <th key={i}>{String.fromCharCode(65+i)}</th>
+                <th key={i}>{excelColName(i)}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {Array.from({length:maxR+1},(_,r)=>(
-              <tr key={r}>
-                <td className="row-hdr">{r+1}</td>
+            {displayRows.map((row, idx)=> row.type === 'collapsed' ? (
+              <tr key={`collapsed-${idx}`}>
+                <td className="row-hdr">…</td>
+                <td className="cell-collapsed" colSpan={maxC+1}>已折叠 {row.count} 行连续空白行</td>
+              </tr>
+            ) : (
+              <tr key={row.r}>
+                <td className="row-hdr">{row.r+1}</td>
                 {Array.from({length:maxC+1},(_,cc)=>{
-                  const val = grid[r]?.[cc]?.val;
-                  const st = cellStyle(r, cc);
+                  if (mergeSkips.has(`${row.r},${cc}`)) return null;
+                  const val = grid[row.r]?.[cc]?.val;
+                  if (!val && !mergeStarts[`${row.r},${cc}`]) return <td key={cc} title="" />;
+                  const st = cellStyle(row.r, cc);
+                  const span = mergeStarts[`${row.r},${cc}`];
                   return (
-                    <td key={cc} style={st} title={val||''}>
-                      {val ? (val.length>10 ? val.slice(0,9)+'…' : val) : ''}
+                    <td key={cc} style={st} title={val||''} rowSpan={span?.rowSpan} colSpan={span?.colSpan}>
+                      {val || ''}
                     </td>
                   );
                 })}
@@ -2015,6 +2163,8 @@ function PreviewTabs({ parseResult, personnel, types, WD_LABELS }) {
             ))}
           </tbody>
         </table>
+        </div>
+      </div>
       </div>
     );
   }
@@ -2079,16 +2229,33 @@ function PreviewTabs({ parseResult, personnel, types, WD_LABELS }) {
         </button>
       </div>
 
+      {tab==='raw' && (
+        <div className="preview-toolbar">
+          <button className="btn btn-sm" onClick={()=>setZoom(z=>Math.max(0.7, +(z - 0.1).toFixed(2)))}>缩小</button>
+          <span className="zoom-label">{Math.round(zoom * 100)}%</span>
+          <button className="btn btn-sm" onClick={()=>setZoom(z=>Math.min(1.8, +(z + 0.1).toFixed(2)))}>放大</button>
+          <button className="btn btn-sm" onClick={()=>setZoom(1)}>重置</button>
+          <div className="spacer" />
+          <span style={{fontSize:'11px',color:'var(--muted)'}}>列宽会根据有数据列自动收缩到当前窗口内，连续 5 行以上空白区自动折叠</span>
+        </div>
+      )}
+
       {/* Legend (raw view only) */}
       {tab==='raw' && (
         <div style={{display:'flex',gap:'10px',marginBottom:'6px',flexWrap:'wrap',fontSize:'11px',alignItems:'center'}}>
-          {Object.entries(CELL_COLORS).map(([k,v])=>(
+          {types.map(t=>(
+            <span key={t.id} style={{display:'inline-flex',alignItems:'center',gap:'4px'}}>
+              <span style={{width:12,height:12,borderRadius:2,background:withAlpha(t.color,'22'),border:`1px solid ${withAlpha(t.color,'88')}`,display:'inline-block'}}/>
+              {t.name}
+            </span>
+          ))}
+          {Object.entries(CELL_COLORS).filter(([k])=>k!=='matched').map(([k,v])=>(
             <span key={k} style={{display:'inline-flex',alignItems:'center',gap:'4px'}}>
               <span style={{width:12,height:12,borderRadius:2,background:v.bg,border:`1px solid ${v.border}`,display:'inline-block'}}/>
               {v.label}
             </span>
           ))}
-          <span style={{color:'var(--muted)',marginLeft:'auto'}}>列 A-Z，行号对应 Excel 行</span>
+          <span style={{color:'var(--muted)',marginLeft:'auto'}}>已识别人员按工时类型着色；列 A-Z，行号对应 Excel 行</span>
         </div>
       )}
 
@@ -2097,13 +2264,66 @@ function PreviewTabs({ parseResult, personnel, types, WD_LABELS }) {
   );
 }
 
+function AliasSearchRow({ raw, value, personnel, onChange }) {
+  const [query, setQuery] = useState(value || '');
+  const [open, setOpen] = useState(false);
+
+  useEffect(()=>{
+    setQuery(value || '');
+  },[value]);
+
+  const suggestions = useMemo(()=>{
+    const trimmed = query.trim();
+    const source = trimmed ? personnel.filter(p=>matchSearch(p.name, trimmed)) : personnel;
+    return source.slice(0, 30);
+  },[personnel, query]);
+
+  function choose(name) {
+    onChange(name);
+    setQuery(name);
+    setOpen(false);
+  }
+
+  const exactMatched = personnel.find(p=>p.name===query);
+
+  return (
+    <div className="alias-map-row">
+      <div className="alias-raw">{raw}</div>
+      <div className="alias-current">{value ? `当前映射：${value}` : '当前未映射'}</div>
+      <div className="alias-match-panel">
+        <input
+          className="inp"
+          value={query}
+          placeholder="搜索姓名 / 拼音首字母"
+          onFocus={()=>setOpen(true)}
+          onBlur={()=>setTimeout(()=>setOpen(false), 120)}
+          onChange={e=>{ setQuery(e.target.value); setOpen(true); }}
+        />
+        {open && suggestions.length>0 && (
+          <div className="alias-suggest">
+            {suggestions.map(p=>(
+              <button key={p.id} onMouseDown={e=>e.preventDefault()} onClick={()=>choose(p.name)}>
+                {p.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="flow-actions">
+        <button className="btn btn-sm" onClick={()=>choose(exactMatched.name)} disabled={!exactMatched}>匹配</button>
+        <button className="btn btn-sm btn-danger" onClick={()=>{ onChange(''); setQuery(''); setOpen(false); }} disabled={!value}>清除</button>
+      </div>
+    </div>
+  );
+}
+
 /* ── React Component ── */
-function ScheduleImportModal({ personnel, types, onSave, close }) {
+function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSave, close }) {
   const [step, setStep]               = useState(1);
   const [fileName, setFileName]       = useState('');
   const [ws, setWs]                   = useState(null);
   const [parseResult, setParseResult] = useState(null);
-  const [extraRules, setExtraRules]   = useState({});
+  const [modalRules, setModalRules]   = useState(()=>normalizeScheduleRules(initialRules));
   const [editData, setEditData]       = useState(null); // editable copy of result
   const [tplName, setTplName]         = useState('');
   // New person row form
@@ -2111,8 +2331,20 @@ function ScheduleImportModal({ personnel, types, onSave, close }) {
   const [newWd, setNewWd]             = useState(0);
   const [newType, setNewType]         = useState('');
   const [newCnt, setNewCnt]           = useState(1);
+  const [typeKeyword, setTypeKeyword] = useState('');
+  const [typeTarget, setTypeTarget]   = useState('');
+  const [weekdayKeyword, setWeekdayKeyword] = useState('');
+  const [weekdayTarget, setWeekdayTarget]   = useState(0);
+  const [ignoreKeyword, setIgnoreKeyword] = useState('');
   const fileRef = useRef();
   const WD_LABELS = ['周一','周二','周三','周四','周五','周六','周日'];
+
+  function rerunParse(sheet = ws, rules = modalRules) {
+    if (!sheet) return;
+    const res = parseScheduleSheetNew(sheet, types, personnel, rules);
+    setParseResult(res);
+    if (!res.error) setEditData(JSON.parse(JSON.stringify(res.result)));
+  }
 
   function handleFile(e) {
     const file = e.target.files[0]; if (!file) return;
@@ -2124,11 +2356,11 @@ function ScheduleImportModal({ personnel, types, onSave, close }) {
         const wb = XLSX.read(ev.target.result, {type:'binary'});
         const sheet = wb.Sheets[wb.SheetNames[0]];
         setWs(sheet);
-        const res = parseScheduleSheetNew(sheet, types, personnel, {});
+        const res = parseScheduleSheetNew(sheet, types, personnel, modalRules);
         setParseResult(res);
         if (!res.error) {
           setEditData(JSON.parse(JSON.stringify(res.result)));
-          setStep(res.unmatched.length > 0 ? 2 : 3);
+          setStep(2);
         }
       } catch(err) { setParseResult({error:'读取失败：'+err.message}); }
     };
@@ -2136,17 +2368,66 @@ function ScheduleImportModal({ personnel, types, onSave, close }) {
     e.target.value = '';
   }
 
-  function setRule(raw, val) {
-    const nr = {...extraRules, [raw]: val};
-    setExtraRules(nr);
-    if (ws) {
-      const res = parseScheduleSheetNew(ws, types, personnel, nr);
-      setParseResult(res);
-      if (!res.error) {
-        setEditData(JSON.parse(JSON.stringify(res.result)));
-        if (res.unmatched.length === 0) setStep(3);
-      }
-    }
+  function updateRules(nextRules) {
+    const normalized = normalizeScheduleRules(nextRules);
+    setModalRules(normalized);
+    rerunParse(ws, normalized);
+  }
+
+  function setAlias(raw, val) {
+    const personAliases = {...modalRules.personAliases};
+    if (val) personAliases[raw] = val;
+    else delete personAliases[raw];
+    updateRules({...modalRules, personAliases});
+  }
+
+  function addTypeRule() {
+    const keyword = normStr(typeKeyword);
+    if (!keyword || !typeTarget) return;
+    updateRules({
+      ...modalRules,
+      typeRules:[...modalRules.typeRules, {id:uid(), keyword, typeName:typeTarget}],
+    });
+    setTypeKeyword('');
+  }
+
+  function addWeekdayRule() {
+    const keyword = normStr(weekdayKeyword);
+    if (!keyword) return;
+    updateRules({
+      ...modalRules,
+      weekdayRules:[...modalRules.weekdayRules, {id:uid(), keyword, weekday:Number(weekdayTarget)}],
+    });
+    setWeekdayKeyword('');
+    setWeekdayTarget(0);
+  }
+
+  function addIgnoreRule() {
+    const keyword = normStr(ignoreKeyword);
+    if (!keyword) return;
+    updateRules({
+      ...modalRules,
+      ignoreRules:[...modalRules.ignoreRules, {id:uid(), keyword}],
+    });
+    setIgnoreKeyword('');
+  }
+
+  function removeRule(group, id) {
+    updateRules({
+      ...modalRules,
+      [group]: modalRules[group].filter(rule=>rule.id!==id),
+    });
+  }
+
+  function saveRuleLibrary() {
+    onSaveRules(normalizeScheduleRules(modalRules));
+  }
+
+  function resetRuleLibrary() {
+    const cleared = makeEmptyScheduleRules();
+    setModalRules(cleared);
+    onSaveRules(cleared);
+    rerunParse(ws, cleared);
   }
 
   // ── Edit helpers ──────────────────────────────────────────────────────
@@ -2198,23 +2479,49 @@ function ScheduleImportModal({ personnel, types, onSave, close }) {
   const editPersons = editData
     ? [...new Set(Object.values(editData).flatMap(d=>Object.keys(d)))].sort()
     : [];
+  const totalRuleCount = Object.keys(modalRules.personAliases).length + modalRules.typeRules.length + modalRules.weekdayRules.length + modalRules.ignoreRules.length;
+  const personAliasPreview = Object.entries(modalRules.personAliases).slice(0,3).map(([from,to])=>`${from} → ${to}`).join('，');
+  const typeRulePreview = modalRules.typeRules.slice(0,3).map(rule=>`${rule.keyword} → ${rule.typeName}`).join('，');
+  const weekdayRulePreview = modalRules.weekdayRules.slice(0,3).map(rule=>`${rule.keyword} → ${WD_LABELS[rule.weekday]}`).join('，');
+  const ignoreRulePreview = modalRules.ignoreRules.slice(0,4).map(rule=>rule.keyword).join('、');
+  const typeKeywordPlaceholder = modalRules.typeRules.length
+    ? `例如：${modalRules.typeRules[0].keyword} → ${modalRules.typeRules[0].typeName}`
+    : types.length
+      ? `例如：晚巡 → ${types[Math.min(1, types.length - 1)].name}`
+      : '例如：晚巡 → 值班';
+  const weekdayKeywordPlaceholder = modalRules.weekdayRules.length
+    ? `例如：${modalRules.weekdayRules[0].keyword} → ${WD_LABELS[modalRules.weekdayRules[0].weekday]}`
+    : '例如：周末夜班 → 周六';
+  const ignoreKeywordPlaceholder = modalRules.ignoreRules.length
+    ? `例如：忽略“${modalRules.ignoreRules[0].keyword}”`
+    : '例如：忽略“备用”';
 
   function doSave() {
     if (!editData) return;
-    onSave({name: tplName || '排班模板', data: editData});
+    onSave({
+      name: tplName || '排班模板',
+      data: editData,
+      preview: parseResult ? {
+        rawGrid: parseResult.rawGrid,
+        rawMerges: parseResult.rawMerges,
+        cellMatchType: parseResult.cellMatchType,
+        cellTypeName: parseResult.cellTypeName,
+        cellSlotMap: parseResult.cellSlotMap,
+      } : null,
+    });
   }
 
   return (
     <div className="overlay" onClick={e=>e.target===e.currentTarget&&close()}>
-      <div className="modal" style={{width:760,maxHeight:'92vh',overflow:'hidden',display:'flex',flexDirection:'column',padding:'18px'}}>
+      <div className="modal" style={{width:'min(1240px, 96vw)',maxHeight:'92vh',overflow:'hidden',display:'flex',flexDirection:'column',padding:'18px'}}>
         <div className="modal-title" style={{marginBottom:10}}>
           📅 排班表 → 周模板
-          <span style={{fontSize:'11px',color:'var(--muted)',fontWeight:400,marginLeft:8}}>可手动编辑后保存</span>
+          <span style={{fontSize:'11px',color:'var(--muted)',fontWeight:400,marginLeft:8}}>支持规则库、人工校正和保存复用</span>
           <button className="close" onClick={close}>✕</button>
         </div>
 
         <div className="step-tabs">
-          {[['1','上传文件'],['2','名称映射'],['3','编辑 & 确认']].map(([n,label],i)=>(
+          {[['1','上传文件'],['2','规则与映射'],['3','编辑 & 确认']].map(([n,label],i)=>(
             <button key={n} className={`step-tab${step===i+1?' active':step>i+1?' done':''}`}
               onClick={()=>step>i+1&&setStep(i+1)}>{n}. {label}</button>
           ))}
@@ -2231,6 +2538,10 @@ function ScheduleImportModal({ personnel, types, onSave, close }) {
               时间段（<code>7:05-9:35</code>）、类型+时段（<code>晚巡21:00-22:00</code>）、
               日期+时段（<code>周六7:30-9:30</code>）、日期（<code>周一</code>）、
               类型（<code>晚上值日</code>、<code>负责人</code>）均自动匹配工时类型
+            </div>
+            <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginBottom:'10px'}}>
+              <span className="flow-badge done">别名规则 {Object.keys(modalRules.personAliases).length}</span>
+              <span className="flow-badge active">解析规则 {modalRules.typeRules.length + modalRules.weekdayRules.length + modalRules.ignoreRules.length}</span>
             </div>
             <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleFile}/>
             <div style={{display:'flex',gap:'10px',alignItems:'center'}}>
@@ -2249,22 +2560,108 @@ function ScheduleImportModal({ personnel, types, onSave, close }) {
         {/* ── Step 2 ── */}
         {step===2 && parseResult && !parseResult.error && (
           <div>
+            <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginBottom:'12px'}}>
+              <span className={`flow-badge ${parseResult.unmatched.length ? 'todo' : 'done'}`}>未匹配姓名 {parseResult.unmatched.length}</span>
+              <span className="flow-badge active">规则总数 {totalRuleCount}</span>
+              <span className="flow-badge active">已识别记录 {Object.values(parseResult.result||{}).reduce((s,d)=>s+Object.values(d).reduce((ss,tt)=>ss+Object.values(tt).reduce((n,v)=>n+v,0),0),0)}</span>
+            </div>
+
+            <div className="rule-block">
+              <div className="rule-block-title">
+                <strong>姓名映射规则</strong>
+                <div className="flow-actions">
+                  <button className="btn btn-sm" onClick={saveRuleLibrary}>保存规则库</button>
+                  <button className="btn btn-sm btn-danger" onClick={resetRuleLibrary}>清空规则库</button>
+                </div>
+              </div>
+              <div style={{fontSize:'12px',color:'var(--muted)',marginBottom:'8px',lineHeight:1.7}}>
+                用于把排班表里的别名、简称或错字统一映射到系统人员。保存后下次导入同类排班表会自动复用。
+              </div>
+              {parseResult.unmatched.length ? (
+                <div className="alias-map-list">
+                  <div className="alias-help">默认会展示完整人员列表；输入姓名或拼音首字母后会缩小范围，再点选完成替换。</div>
+                  {parseResult.unmatched.map(raw=>(
+                    <AliasSearchRow
+                      key={raw}
+                      raw={raw}
+                      value={modalRules.personAliases[raw]||''}
+                      personnel={personnel}
+                      onChange={val=>setAlias(raw, val)}
+                    />
+                  ))}
+                  {personAliasPreview && <div className="rule-note">现有别名规则：{personAliasPreview}</div>}
+                </div>
+              ) : (
+                <div className="rule-empty">当前文件没有未匹配姓名，可以继续配置类型、星期和忽略规则。</div>
+              )}
+            </div>
+
+            <div className="rule-block">
+              <div className="rule-block-title"><strong>类型关键词规则</strong><span style={{fontSize:'11px',color:'var(--muted)'}}>命中关键词时强制指定工时类型</span></div>
+              <div className="rule-add-grid compact" style={{marginBottom:'8px'}}>
+                <input className="inp" placeholder={typeKeywordPlaceholder} value={typeKeyword} onChange={e=>setTypeKeyword(e.target.value)}/>
+                <select className="rule-sel" value={typeTarget} onChange={e=>setTypeTarget(e.target.value)}>
+                  <option value="">选择工时类型</option>
+                  {types.map(t=><option key={t.id} value={t.name}>{t.name} · {t.hours}h</option>)}
+                </select>
+              </div>
+              <div className="flow-actions" style={{marginBottom:'8px'}}>
+                <button className="btn btn-sm" onClick={addTypeRule}>新增类型规则</button>
+              </div>
+              <div className="rule-list">
+                {modalRules.typeRules.length ? modalRules.typeRules.map(rule=>(
+                  <div key={rule.id} className="rule-chip">
+                    <code>{rule.keyword}</code><span className="sp">→</span><strong>{rule.typeName}</strong>
+                    <button className="btn btn-sm btn-danger" onClick={()=>removeRule('typeRules', rule.id)}>删除</button>
+                  </div>
+                )) : <div className="rule-empty">暂无类型关键词规则。</div>}
+              </div>
+              {typeRulePreview && <div className="rule-note">现有类型规则：{typeRulePreview}</div>}
+            </div>
+
+            <div className="rule-block">
+              <div className="rule-block-title"><strong>星期关键词规则</strong><span style={{fontSize:'11px',color:'var(--muted)'}}>遇到非标准写法时强制指定周几</span></div>
+              <div className="rule-add-grid compact" style={{marginBottom:'8px'}}>
+                <input className="inp" placeholder={weekdayKeywordPlaceholder} value={weekdayKeyword} onChange={e=>setWeekdayKeyword(e.target.value)}/>
+                <select className="rule-sel" value={weekdayTarget} onChange={e=>setWeekdayTarget(e.target.value)}>
+                  {WD_LABELS.map((label, index)=><option key={label} value={index}>{label}</option>)}
+                </select>
+              </div>
+              <div className="flow-actions" style={{marginBottom:'8px'}}>
+                <button className="btn btn-sm" onClick={addWeekdayRule}>新增星期规则</button>
+              </div>
+              <div className="rule-list">
+                {modalRules.weekdayRules.length ? modalRules.weekdayRules.map(rule=>(
+                  <div key={rule.id} className="rule-chip">
+                    <code>{rule.keyword}</code><span className="sp">→</span><strong>{WD_LABELS[rule.weekday]}</strong>
+                    <button className="btn btn-sm btn-danger" onClick={()=>removeRule('weekdayRules', rule.id)}>删除</button>
+                  </div>
+                )) : <div className="rule-empty">暂无星期关键词规则。</div>}
+              </div>
+              {weekdayRulePreview && <div className="rule-note">现有星期规则：{weekdayRulePreview}</div>}
+            </div>
+
+            <div className="rule-block">
+              <div className="rule-block-title"><strong>忽略关键词规则</strong><span style={{fontSize:'11px',color:'var(--muted)'}}>命中后不再把单元格识别为人员姓名</span></div>
+              <div className="rule-add-grid single" style={{marginBottom:'8px'}}>
+                <input className="inp" placeholder={ignoreKeywordPlaceholder} value={ignoreKeyword} onChange={e=>setIgnoreKeyword(e.target.value)}/>
+                <button className="btn btn-sm" onClick={addIgnoreRule}>新增忽略词</button>
+              </div>
+              <div className="rule-list">
+                {modalRules.ignoreRules.length ? modalRules.ignoreRules.map(rule=>(
+                  <div key={rule.id} className="rule-chip">
+                    <code>{rule.keyword}</code>
+                    <button className="btn btn-sm btn-danger" onClick={()=>removeRule('ignoreRules', rule.id)}>删除</button>
+                  </div>
+                )) : <div className="rule-empty">暂无忽略关键词规则。</div>}
+              </div>
+              {ignoreRulePreview && <div className="rule-note">当前忽略关键词：{ignoreRulePreview}</div>}
+            </div>
+
             <div style={{fontSize:'12px',color:'var(--yellow)',marginBottom:'12px',padding:'8px 12px',
               background:'var(--yellow)1a',borderRadius:6,border:'1px solid var(--yellow)'}}>
-              ⚠ <strong>{parseResult.unmatched.length}</strong> 个姓名未能自动匹配，请手动指定（留空则跳过）
+              ⚠ 如果当前解析仍有缺口，先在上面补规则并保存，再进入下一步人工编辑。
             </div>
-            {parseResult.unmatched.map(raw=>(
-              <div key={raw} className="rule-row">
-                <code style={{fontSize:'12px',padding:'3px 8px',background:'var(--surface2)',
-                  borderRadius:4,minWidth:'80px',color:'var(--red)'}}>{raw}</code>
-                <span className="arr">→</span>
-                <select className="rule-sel" value={extraRules[raw]||''} onChange={e=>setRule(raw,e.target.value)}>
-                  <option value="">— 跳过 —</option>
-                  {personnel.map(p=><option key={p.id} value={p.name}>{p.name}</option>)}
-                </select>
-                {extraRules[raw] && <span style={{fontSize:'11px',color:'var(--green)'}}>✓ {extraRules[raw]}</span>}
-              </div>
-            ))}
             <div style={{marginTop:'14px',display:'flex',gap:'8px'}}>
               <button className="btn" onClick={()=>setStep(1)}>← 返回</button>
               <button className="btn btn-primary" onClick={()=>{ setEditData(JSON.parse(JSON.stringify(parseResult.result))); setStep(3); }}>
@@ -2285,88 +2682,35 @@ function ScheduleImportModal({ personnel, types, onSave, close }) {
                 <strong style={{color:'var(--accent)'}}> {totalCount}</strong> 条记录
               </span>
               {parseResult?.unmatched?.length>0 && (
-                <span style={{color:'var(--yellow)'}}>⚠ {parseResult.unmatched.length} 人跳过</span>
+                <span style={{color:'var(--yellow)'}}>⚠ {parseResult.unmatched.length} 个姓名仍未匹配，可返回继续补规则</span>
               )}
               <span style={{fontSize:'11px',color:'var(--muted)',marginLeft:'auto'}}>
-                💡 点击单元格内 ✕ 删除条目，下方可新增行
+                💡 这里先把周模板校准干净；保存后建议切到按周修订模式套用，再回按天逐格核对统计差异
               </span>
             </div>
 
-            {/* Editable person × weekday table */}
-            <div className="sched-table-wrap" style={{maxHeight:'340px'}}>
-              <table className="edit-tbl">
-                <thead>
-                  <tr>
-                    <th className="col-name">姓名</th>
-                    {WD_LABELS.map(w=><th key={w}>{w}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {editPersons.map(pname=>(
-                    <tr key={pname}>
-                      <td className="col-name">{pname}</td>
-                      {[0,1,2,3,4,5,6].map(wd=>{
-                        const dayData = editData[wd]?.[pname];
-                        const entries = dayData ? Object.entries(dayData) : [];
-                        return (
-                          <td key={wd}>
-                            <div className="edit-cell">
-                              {entries.map(([tn,cnt])=>{
-                                const t = types.find(t=>t.name===tn);
-                                return (
-                                  <div key={tn} className="edit-entry">
-                                    <select value={tn} onChange={e=>{
-                                      const newTn=e.target.value;
-                                      if (newTn===tn) return;
-                                      setCount(wd,pname,tn,0);
-                                      setCount(wd,pname,newTn,cnt);
-                                    }} style={{color:t?.color||'var(--text)'}}>
-                                      {types.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}
-                                    </select>
-                                    <span style={{color:'var(--muted)',fontSize:'10px'}}>×</span>
-                                    <input type="number" min="1" max="99" value={cnt}
-                                      onChange={e=>setCount(wd,pname,tn,parseInt(e.target.value)||1)}/>
-                                    <span className="del-entry"
-                                      onClick={()=>deleteEntry(wd,pname,tn)}>✕</span>
-                                  </div>
-                                );
-                              })}
-                              <button className="add-entry-btn"
-                                onClick={()=>addTypeToCell(wd,pname)}>＋</button>
-                            </div>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="rule-block" style={{marginBottom:'12px'}}>
+              <div className="rule-block-title">
+                <strong>原表布局可视化预览</strong>
+                <span style={{fontSize:'11px',color:'var(--muted)'}}>与导入 Excel 保持相同网格结构，已识别人员按工时类型着色</span>
+              </div>
+              <PreviewTabs
+                parseResult={parseResult}
+                personnel={personnel}
+                types={types}
+                WD_LABELS={WD_LABELS}
+                initialTab="raw"
+              />
             </div>
 
-            {/* Add new person row */}
-            <div className="add-person-row">
-              <span style={{fontSize:'12px',color:'var(--muted)',flexShrink:0}}>新增行：</span>
-              <select value={newPerson} onChange={e=>setNewPerson(e.target.value)}
-                style={{flex:1,minWidth:'80px'}}>
-                <option value="">选择人员…</option>
-                {personnel.map(p=><option key={p.id} value={p.name}>{p.name}</option>)}
-              </select>
-              <select value={newWd} onChange={e=>setNewWd(parseInt(e.target.value))}>
-                {WD_LABELS.map((w,i)=><option key={i} value={i}>{w}</option>)}
-              </select>
-              <select value={newType} onChange={e=>setNewType(e.target.value)}>
-                <option value="">选类型…</option>
-                {types.map(t=><option key={t.id} value={t.name}>{t.name} {t.hours}h</option>)}
-              </select>
-              <input type="number" min="1" max="99" value={newCnt}
-                onChange={e=>setNewCnt(parseInt(e.target.value)||1)}
-                style={{width:'50px'}} placeholder="次"/>
-              <button className="btn btn-sm btn-primary" onClick={addNewRow}>添加</button>
+            <div style={{fontSize:'12px',color:'var(--muted)',marginTop:'10px',lineHeight:1.8,
+              background:'var(--surface2)',borderRadius:8,padding:'10px 12px'}}>
+              当前阶段只保留原始视图确认。若识别仍有问题，请返回上一步补规则；确认无误后直接保存为模板，并在按周修订模式中完成替换。
             </div>
 
             {/* Footer */}
             <div style={{display:'flex',gap:'8px',alignItems:'center',marginTop:'10px',flexWrap:'wrap'}}>
-              <button className="btn" onClick={()=>setStep(parseResult?.unmatched?.length>0?2:1)}>← 返回</button>
+              <button className="btn" onClick={()=>setStep(2)}>← 返回规则</button>
               <input className="inp" placeholder="模板名称…" value={tplName}
                 onChange={e=>setTplName(e.target.value)} style={{flex:1,minWidth:'120px'}}/>
               <button className="btn btn-primary" disabled={!totalCount} onClick={doSave}>
