@@ -209,6 +209,21 @@ function buildGrid(ws) {
   };
 }
 
+function buildMergeAnchorGetter(ws) {
+  const anchorMap = {};
+  for (const m of (ws['!merges'] || [])) {
+    const anchor = `${m.s.r},${m.s.c}`;
+    for (let r = m.s.r; r <= m.e.r; r++) {
+      for (let c = m.s.c; c <= m.e.c; c++) {
+        anchorMap[`${r},${c}`] = anchor;
+      }
+    }
+  }
+  return function(r, c) {
+    return anchorMap[`${r},${c}`] || `${r},${c}`;
+  };
+}
+
 function getSheetDims(ws) {
   const ref = ws['!ref'];
   if (!ref) return {maxR:0, maxC:0};
@@ -219,6 +234,7 @@ function getSheetDims(ws) {
 function parseScheduleSheetNew(ws, types, personnel, parserRules) {
   const rules = ensureScheduleRules(parserRules);
   const G = buildGrid(ws);
+  const getMergeAnchor = buildMergeAnchorGetter(ws);
   const {maxR, maxC} = getSheetDims(ws);
   const rawGrid = Array.from({length:maxR+1}, (_, r)=>
     Array.from({length:maxC+1}, (_, cc)=>({ val: G(r,cc) || '' }))
@@ -343,7 +359,8 @@ function parseScheduleSheetNew(ws, types, personnel, parserRules) {
         }
       }
 
-      groups.push({wd: foundWd, pcols, typeCol, sc});
+      const weekdayLabel = foundWdCol >= 0 ? (G(hr, foundWdCol) || '') : '';
+      groups.push({wd: foundWd, pcols, typeCol, sc, weekdayLabel});
     }
 
     // ── 2c. Process data rows ─────────────────────────────────────────
@@ -361,11 +378,13 @@ function parseScheduleSheetNew(ws, types, personnel, parserRules) {
         if (!wt) continue;
         cellMatchType[`${r},${grp.typeCol}`] = 'type';
 
-        const seen = new Set();
+        const seenAnchors = new Set();
         for (const cc of grp.pcols) {
           const nm = G(r, cc);
-          if (!nm || seen.has(nm) || !isPersonName(nm, rules)) continue;
-          seen.add(nm);
+          if (!nm || !isPersonName(nm, rules)) continue;
+          const anchor = getMergeAnchor(r, cc);
+          if (seenAnchors.has(anchor)) continue;
+          seenAnchors.add(anchor);
           const pObj = tryMatch(nm);
           if (pObj) {
             result[wd] = result[wd]||{};
@@ -374,7 +393,12 @@ function parseScheduleSheetNew(ws, types, personnel, parserRules) {
             cellMatchType[`${r},${cc}`] = 'matched';
             cellTypeName[`${r},${cc}`] = wt.name;
             cellSlotMap[`${r},${cc}`] = {
+              row: r,
+              col: cc,
+              slotKey: `${r},${cc}`,
               weekday: wd,
+              colLimit: grp.weekdayLabel || WD[wd] || '',
+              rowLimit: typeNorm,
               personName: pObj.name,
               typeName: wt.name,
             };

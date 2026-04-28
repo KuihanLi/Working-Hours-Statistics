@@ -20,9 +20,73 @@ const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
 /* ═══ Pinyin Search (via pinyin-pro) ══════════════════════════════════════ */
 function App() {
+  function countCell(cell) {
+    if (Array.isArray(cell)) return cell.length;
+    const n = parseInt(cell, 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  function normalizeEntry(entry, fallback = {}) {
+    if (entry && typeof entry === 'object') {
+      return {
+        id: entry.id || uid(),
+        source: entry.source || fallback.source || 'legacy',
+        createdAt: Number.isFinite(entry.createdAt) ? entry.createdAt : Date.now(),
+        absSlotKey: entry.absSlotKey || entry.slotKey || fallback.absSlotKey || null,
+        absRow: Number.isFinite(entry.absRow) ? entry.absRow : (Number.isFinite(entry.row) ? entry.row : (fallback.absRow ?? null)),
+        absCol: Number.isFinite(entry.absCol) ? entry.absCol : (Number.isFinite(entry.col) ? entry.col : (fallback.absCol ?? null)),
+        rowLimit: entry.rowLimit || fallback.rowLimit || null,
+        colLimit: entry.colLimit || fallback.colLimit || null,
+        typeName: entry.typeName || fallback.typeName || null,
+      };
+    }
+    return {
+      id: uid(),
+      source: fallback.source || 'legacy',
+      createdAt: Date.now(),
+      absSlotKey: fallback.absSlotKey || null,
+      absRow: fallback.absRow ?? null,
+      absCol: fallback.absCol ?? null,
+      rowLimit: fallback.rowLimit || null,
+      colLimit: fallback.colLimit || null,
+      typeName: fallback.typeName || null,
+    };
+  }
+
+  function normalizeCellEntries(cell, fallback = {}) {
+    if (Array.isArray(cell)) return cell.map(item=>normalizeEntry(item, fallback));
+    const n = countCell(cell);
+    return Array.from({length:n}, ()=>normalizeEntry(null, fallback));
+  }
+
+  function normalizeRecordsModel(input) {
+    const out = {};
+    if (!input || typeof input !== 'object') return out;
+    Object.entries(input).forEach(([dateStr, dayObj])=>{
+      if (!dayObj || typeof dayObj !== 'object') return;
+      out[dateStr] = {};
+      Object.entries(dayObj).forEach(([pid, personObj])=>{
+        if (!personObj || typeof personObj !== 'object') return;
+        out[dateStr][pid] = {};
+        Object.entries(personObj).forEach(([tid, cell])=>{
+          const n = countCell(cell);
+          if (!n && !Array.isArray(cell)) return;
+          out[dateStr][pid][tid] = normalizeCellEntries(cell);
+        });
+        if (!Object.keys(out[dateStr][pid]).length) delete out[dateStr][pid];
+      });
+      if (!Object.keys(out[dateStr]).length) delete out[dateStr];
+    });
+    return out;
+  }
+
+  const LS_TEMPLATE_LEGACY = 'wh_template';
+  const LS_TEMPLATE_LIBRARY = 'wh_template_library';
+  const LS_WEEK_TEMPLATE_MAP = 'wh_week_template_map';
+  const LS_WEEK_DAY_LOCKS = 'wh_week_day_locks';
   const [personnel, setPersonnel] = useState(()=>loadLS('wh_personnel', DEF_PERSONNEL));
   const [types, setTypes]         = useState(()=>loadLS('wh_types', DEF_TYPES));
-  const [records, setRecords]     = useState(()=>loadLS('wh_records', {}));
+  const [records, setRecords]     = useState(()=>normalizeRecordsModel(loadLS('wh_records', {})));
   const [view, setView]           = useState('day');
   const [weekMode, setWeekMode]   = useState('stats');
   const [curDate, setCurDate]     = useState(new Date());
@@ -30,15 +94,33 @@ function App() {
   const [modal, setModal]         = useState(null);
   const [confirmCb, setConfirmCb] = useState(null);
   const [theme, setTheme]         = useState(()=>loadLS('wh_theme','dark'));
-  const [template, setTemplate]   = useState(()=>loadLS('wh_template', null));   // {name, data:{relDay(0-6):{pid_name:{tid_name:count}}}}
+  const [templateLibrary, setTemplateLibrary] = useState(()=>{
+    const list = loadLS(LS_TEMPLATE_LIBRARY, null);
+    if (Array.isArray(list)) {
+      return list
+        .map((tpl, idx)=>normalizeTemplateObject({
+          ...tpl,
+          id: tpl?.id || `tpl_migrated_${Date.now()}_${idx}`,
+        }))
+        .filter(Boolean);
+    }
+    const legacy = loadLS(LS_TEMPLATE_LEGACY, null);
+    if (!legacy) return [];
+    return [normalizeTemplateObject({ ...legacy, id: `tpl_${Date.now()}` })].filter(Boolean);
+  });
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [weekTemplateMap, setWeekTemplateMap] = useState(()=>loadLS(LS_WEEK_TEMPLATE_MAP, {}));
+  const [weekDayLocks, setWeekDayLocks] = useState(()=>loadLS(LS_WEEK_DAY_LOCKS, {}));
   const [hiddenIds, setHiddenIds] = useState(()=>{ try{ return new Set(JSON.parse(localStorage.getItem('wh_hidden')||'[]')); }catch{ return new Set(); } });
   const [autoHide,  setAutoHide]  = useState(()=>loadLS('wh_autohide', false));
   const [showDiff,  setShowDiff]  = useState(false);
+  const [toast, setToast]         = useState(null);
   const [scheduleRules, setScheduleRules] = useState(()=>normalizeScheduleRules(loadLS('wh_schedule_rules', makeEmptyScheduleRules())));
   const [flowCollapsed, setFlowCollapsed] = useState(()=>loadLS('wh_flow_collapsed', false));
   const importRecRef = useRef();
   const importPplRef = useRef();
-  const importTplRef = useRef();
+  const mainRef = useRef(null);
+  const toastTimerRef = useRef(null);
 
   useEffect(()=>{ localStorage.setItem('wh_personnel',JSON.stringify(personnel)); },[personnel]);
   useEffect(()=>{ localStorage.setItem('wh_types',JSON.stringify(types)); },[types]);
@@ -53,12 +135,19 @@ function App() {
     localStorage.setItem('wh_schedule_rules', JSON.stringify(scheduleRules));
   },[scheduleRules]);
   useEffect(()=>{
-    if (template) localStorage.setItem('wh_template', JSON.stringify(template));
-    else localStorage.removeItem('wh_template');
-  },[template]);
+    localStorage.setItem(LS_TEMPLATE_LIBRARY, JSON.stringify(templateLibrary));
+    localStorage.removeItem(LS_TEMPLATE_LEGACY);
+  },[templateLibrary]);
+  useEffect(()=>{
+    localStorage.setItem(LS_WEEK_TEMPLATE_MAP, JSON.stringify(weekTemplateMap));
+  },[weekTemplateMap]);
+  useEffect(()=>{
+    localStorage.setItem(LS_WEEK_DAY_LOCKS, JSON.stringify(weekDayLocks));
+  },[weekDayLocks]);
   useEffect(()=>{
     localStorage.setItem('wh_flow_collapsed', JSON.stringify(flowCollapsed));
   },[flowCollapsed]);
+  useEffect(()=>()=>{ if (toastTimerRef.current) clearTimeout(toastTimerRef.current); },[]);
   // Auto-hide zero-hours people when autoHide is on and view/date changes
   useEffect(()=>{
     if (!autoHide) return;
@@ -85,6 +174,30 @@ function App() {
 
   const monday  = useMemo(()=>getMonday(curDate),[curDate]);
   const wDates  = useMemo(()=>weekDates(monday),[monday]);
+  const currentWeekStart = useMemo(()=>fmt(monday), [monday]);
+  const assignedTemplateId = weekTemplateMap?.[currentWeekStart] || '';
+  const currentTemplate = useMemo(
+    ()=>templateLibrary.find(t=>t.id===assignedTemplateId) || null,
+    [templateLibrary, assignedTemplateId]
+  );
+  const selectedTemplate = useMemo(
+    ()=>templateLibrary.find(t=>t.id===selectedTemplateId) || null,
+    [templateLibrary, selectedTemplateId]
+  );
+  const isCurrentWeekDayLocked = false;
+
+  useEffect(()=>{
+    if (!templateLibrary.length) {
+      if (selectedTemplateId) setSelectedTemplateId('');
+      return;
+    }
+    const selectedExists = templateLibrary.some(t=>t.id===selectedTemplateId);
+    if (!selectedExists) setSelectedTemplateId(templateLibrary[0].id);
+  },[templateLibrary, selectedTemplateId]);
+
+  useEffect(()=>{
+    if (!currentTemplate && showDiff) setShowDiff(false);
+  },[currentTemplate, showDiff]);
   const filtered        = useMemo(()=>{
     const lib = window.pinyinPro;
     return personnel
@@ -109,7 +222,7 @@ function App() {
 
   // diffPersonnel: when diff mode on, add people who appear in template but not in tablePersonnel
   const diffPersonnel = useMemo(()=>{
-    if (!showDiff || !template) return tablePersonnel;
+    if (!showDiff || !currentTemplate) return tablePersonnel;
     const inTable = new Set(tablePersonnel.map(p=>p.id));
     const extra = [];
     // for day view: check relDay; for week view: check all 7 days
@@ -119,23 +232,107 @@ function App() {
     for (const p of personnel) {
       if (inTable.has(p.id)) continue;
       const hasInTpl = checkDays.some(wd=>{
-        const d = template.data[wd];
+        const d = currentTemplate.data[wd];
         return d && d[p.name] && Object.values(d[p.name]).some(v=>v>0);
       });
       if (hasInTpl) extra.push(p);
     }
     return [...tablePersonnel, ...extra];
-  },[showDiff, template, tablePersonnel, personnel, view, curDate]);
+  },[showDiff, currentTemplate, tablePersonnel, personnel, view, curDate]);
   const todayStr= fmt(new Date());
 
   /* ── Record helpers ── */
-  function getCount(dateStr, pid, tid) { return records?.[dateStr]?.[pid]?.[tid] || 0; }
+  function getCount(dateStr, pid, tid) {
+    return countCell(records?.[dateStr]?.[pid]?.[tid]);
+  }
+  function getEntries(dateStr, pid, tid, fallback = {}) {
+    const cell = records?.[dateStr]?.[pid]?.[tid];
+    return normalizeCellEntries(cell, fallback).sort((a,b)=>{
+      const ar = Number.isFinite(a?.absRow) ? a.absRow : Number.POSITIVE_INFINITY;
+      const br = Number.isFinite(b?.absRow) ? b.absRow : Number.POSITIVE_INFINITY;
+      const ac = Number.isFinite(a?.absCol) ? a.absCol : Number.POSITIVE_INFINITY;
+      const bc = Number.isFinite(b?.absCol) ? b.absCol : Number.POSITIVE_INFINITY;
+      if (ar !== br) return ar - br;
+      if (ac !== bc) return ac - bc;
+      return String(a?.id || '').localeCompare(String(b?.id || ''), 'zh');
+    });
+  }
   function getTplCount(relDay, personName, typeName) {
-    return template?.data?.[relDay]?.[personName]?.[typeName] || 0;
+    return currentTemplate?.data?.[relDay]?.[personName]?.[typeName] || 0;
+  }
+  const tplEntryIndex = useMemo(()=>{
+    const out = {};
+    if (!currentTemplate) return out;
+    const push = (key, entry) => {
+      out[key] = out[key] || [];
+      out[key].push(entry);
+    };
+    const slotMap = currentTemplate?.preview?.cellSlotMap || {};
+    Object.entries(slotMap)
+      .sort((a,b)=>{
+        const [ak,av] = a;
+        const [bk,bv] = b;
+        const ar = Number.isFinite(av?.row) ? av.row : parseInt(String(ak).split(',')[0],10);
+        const ac = Number.isFinite(av?.col) ? av.col : parseInt(String(ak).split(',')[1],10);
+        const br = Number.isFinite(bv?.row) ? bv.row : parseInt(String(bk).split(',')[0],10);
+        const bc = Number.isFinite(bv?.col) ? bv.col : parseInt(String(bk).split(',')[1],10);
+        return ar-br || ac-bc;
+      })
+      .forEach(([slotKey, slot])=>{
+        if (!slot?.personName || !slot?.typeName) return;
+        const relDay = Number(slot.weekday);
+        if (!Number.isFinite(relDay)) return;
+        const key = `${relDay}|${slot.personName}|${slot.typeName}`;
+        push(key, normalizeEntry({
+          id: `tpl_${slot.slotKey || slotKey}`,
+          source: 'template',
+          absSlotKey: slot.slotKey || slotKey,
+          absRow: Number.isFinite(slot.row) ? slot.row : null,
+          absCol: Number.isFinite(slot.col) ? slot.col : null,
+          rowLimit: slot.rowLimit || slot.typeName,
+          colLimit: slot.colLimit || WD[relDay] || '',
+          typeName: slot.typeName,
+        }));
+      });
+    Object.entries(currentTemplate?.data || {}).forEach(([wd, dayMap])=>{
+      const relDay = parseInt(wd, 10);
+      if (!Number.isFinite(relDay)) return;
+      Object.entries(dayMap || {}).forEach(([personName, typeMap])=>{
+        Object.entries(typeMap || {}).forEach(([typeName, cntRaw])=>{
+          const cnt = parseInt(cntRaw, 10) || 0;
+          if (!(cnt > 0)) return;
+          const key = `${relDay}|${personName}|${typeName}`;
+          out[key] = out[key] || [];
+          while (out[key].length < cnt) {
+            out[key].push(normalizeEntry({
+              id: `tpl_virtual_${relDay}_${personName}_${typeName}_${out[key].length}`,
+              source: 'template',
+              rowLimit: typeName,
+              colLimit: WD[relDay] || '',
+              typeName,
+            }));
+          }
+        });
+      });
+    });
+    const sortEntries = arr => arr.sort((a,b)=>{
+      const ar = Number.isFinite(a?.absRow) ? a.absRow : Number.POSITIVE_INFINITY;
+      const br = Number.isFinite(b?.absRow) ? b.absRow : Number.POSITIVE_INFINITY;
+      const ac = Number.isFinite(a?.absCol) ? a.absCol : Number.POSITIVE_INFINITY;
+      const bc = Number.isFinite(b?.absCol) ? b.absCol : Number.POSITIVE_INFINITY;
+      if (ar !== br) return ar - br;
+      if (ac !== bc) return ac - bc;
+      return String(a?.id || '').localeCompare(String(b?.id || ''), 'zh');
+    });
+    Object.values(out).forEach(sortEntries);
+    return out;
+  },[currentTemplate]);
+  function getTplEntries(relDay, personName, typeName) {
+    return tplEntryIndex[`${relDay}|${personName}|${typeName}`] || [];
   }
   function dayHours(dateStr, pid) {
     const dr = records?.[dateStr]?.[pid] || {};
-    return types.reduce((s,t)=>s+(dr[t.id]||0)*t.hours, 0);
+    return types.reduce((s,t)=>s+countCell(dr[t.id])*t.hours, 0);
   }
   function weekHours(pid) {
     return wDates.reduce((s,d)=>s+dayHours(fmt(d),pid), 0);
@@ -148,26 +345,140 @@ function App() {
     return weekHours(pid);
   }
 
-  function update(dateStr, pid, tid, delta) {
+  function showToast(msg, type = 'info', duration = 2200) {
+    const id = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ id, msg, type });
+    toastTimerRef.current = setTimeout(()=>{
+      setToast(prev=>prev?.id===id ? null : prev);
+    }, duration);
+  }
+
+  function makeEntryByTypeId(tid, base = {}) {
+    const typeName = types.find(t=>t.id===tid)?.name || base.typeName || null;
+    return normalizeEntry({
+      ...base,
+      typeName,
+      createdAt: Date.now(),
+    }, { typeName, source: base.source || 'day' });
+  }
+
+  function update(dateStr, pid, tid, delta, source = 'day') {
     setRecords(prev => {
       const r = JSON.parse(JSON.stringify(prev));
       r[dateStr] = r[dateStr] || {};
       r[dateStr][pid] = r[dateStr][pid] || {};
-      const cur = r[dateStr][pid][tid] || 0;
-      const nxt = Math.max(0, cur + delta);
-      if (nxt===0) {
+      const curArr = normalizeCellEntries(r[dateStr][pid][tid], { source: 'legacy' });
+      if (delta > 0) {
+        for (let i=0; i<delta; i++) curArr.push(makeEntryByTypeId(tid, { source }));
+      } else if (delta < 0) {
+        for (let i=0; i<Math.abs(delta) && curArr.length; i++) curArr.pop();
+      }
+      if (!curArr.length) {
         delete r[dateStr][pid][tid];
         if (!Object.keys(r[dateStr][pid]).length) delete r[dateStr][pid];
         if (!Object.keys(r[dateStr]).length) delete r[dateStr];
       } else {
-        r[dateStr][pid][tid] = nxt;
+        r[dateStr][pid][tid] = curArr;
       }
+      return r;
+    });
+  }
+
+  function removeEntryById(dateStr, pid, tid, entryId, source = 'day') {
+    if (!entryId) return;
+    setRecords(prev => {
+      const r = JSON.parse(JSON.stringify(prev));
+      const arr = normalizeCellEntries(r?.[dateStr]?.[pid]?.[tid], { source: 'legacy' });
+      const idx = arr.findIndex(e=>e.id===entryId);
+      if (idx < 0) return prev;
+      arr.splice(idx, 1);
+      if (!r[dateStr]) r[dateStr] = {};
+      if (!r[dateStr][pid]) r[dateStr][pid] = {};
+      if (!arr.length) {
+        delete r[dateStr][pid][tid];
+        if (!Object.keys(r[dateStr][pid]).length) delete r[dateStr][pid];
+        if (!Object.keys(r[dateStr]).length) delete r[dateStr];
+      } else {
+        r[dateStr][pid][tid] = arr;
+      }
+      return r;
+    });
+  }
+
+  function moveEntryToPerson(dateStr, fromPid, toPid, tid, entryId, source = 'day') {
+    if (!entryId || !toPid || fromPid === toPid) return;
+    setRecords(prev => {
+      const r = JSON.parse(JSON.stringify(prev));
+      const fromArr = normalizeCellEntries(r?.[dateStr]?.[fromPid]?.[tid], { source: 'legacy' });
+      const idx = fromArr.findIndex(e=>e.id===entryId);
+      if (idx < 0) return prev;
+      const [entry] = fromArr.splice(idx, 1);
+
+      r[dateStr] = r[dateStr] || {};
+      r[dateStr][toPid] = r[dateStr][toPid] || {};
+      const toArr = normalizeCellEntries(r[dateStr][toPid][tid], { source: 'legacy' });
+      toArr.push(normalizeEntry(entry, { source }));
+      r[dateStr][toPid][tid] = toArr;
+
+      if (fromArr.length) {
+        r[dateStr][fromPid][tid] = fromArr;
+      } else if (r[dateStr][fromPid]) {
+        delete r[dateStr][fromPid][tid];
+        if (!Object.keys(r[dateStr][fromPid]).length) delete r[dateStr][fromPid];
+      }
+      if (!Object.keys(r[dateStr]).length) delete r[dateStr];
       return r;
     });
   }
 
   function navigate(delta) {
     setCurDate(d => addDays(d, view==='week' ? delta*7 : delta));
+  }
+
+  function switchWeekMode(nextMode) {
+    setWeekMode(nextMode);
+  }
+
+  function canScrollY(el, deltaY) {
+    if (!el) return false;
+    const maxTop = el.scrollHeight - el.clientHeight;
+    if (maxTop <= 0) return false;
+    if (deltaY > 0) return el.scrollTop < maxTop - 1;
+    if (deltaY < 0) return el.scrollTop > 1;
+    return false;
+  }
+
+  function handleMainWheel(e) {
+    const outer = mainRef.current;
+    if (!outer) return;
+    const dy = e.deltaY;
+    if (Math.abs(dy) < 0.5 || Math.abs(dy) < Math.abs(e.deltaX || 0)) return;
+    if (canScrollY(outer, dy)) return;
+
+    const selectors = ['.raw-grid-wrap', '.grid-wrap', '.sched-table-wrap'];
+    const outerRect = outer.getBoundingClientRect();
+    const candidates = Array.from(outer.querySelectorAll(selectors.join(',')))
+      .filter(el=>{
+        if (!canScrollY(el, dy)) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.bottom > outerRect.top + 8 && rect.top < outerRect.bottom - 8;
+      });
+    if (!candidates.length) return;
+
+    let target = candidates[0];
+    let minDist = Number.POSITIVE_INFINITY;
+    candidates.forEach(el=>{
+      const rect = el.getBoundingClientRect();
+      const center = rect.top + rect.height / 2;
+      const dist = Math.abs(center - e.clientY);
+      if (dist < minDist) {
+        minDist = dist;
+        target = el;
+      }
+    });
+    target.scrollTop += dy;
+    e.preventDefault();
   }
 
   /* ── Date label ── */
@@ -185,10 +496,157 @@ function App() {
     totalRecordDays: Object.keys(records).length,
     totalEntries: Object.values(records).reduce((sum, day) =>
       sum + Object.values(day).reduce((ss, person) =>
-        ss + Object.values(person).reduce((n,v)=>n+(parseInt(v,10)||0),0), 0), 0),
+        ss + Object.values(person).reduce((n,v)=>n+countCell(v),0), 0), 0),
     aliasRuleCount: Object.keys(scheduleRules.personAliases).length,
     parserRuleCount: scheduleRules.typeRules.length + scheduleRules.weekdayRules.length + scheduleRules.ignoreRules.length,
   };
+
+  function buildWeekRecordPools(weekDatesArr) {
+    const exact = {};
+    const coord = {};
+    const pidToName = Object.fromEntries(personnel.map(p=>[p.id, p.name]));
+    const typeById = Object.fromEntries(types.map(t=>[t.id, t]));
+    const pushPool = (bucket, key, item) => {
+      bucket[key] = bucket[key] || [];
+      bucket[key].push(item);
+    };
+    weekDatesArr.forEach((d, relDay)=>{
+      const dateStr = fmt(d);
+      const dayRec = records?.[dateStr] || {};
+      Object.entries(dayRec).forEach(([pid, personRec])=>{
+        const personName = pidToName[pid];
+        if (!personName) return;
+        Object.entries(personRec || {}).forEach(([tid, cell])=>{
+          const typeName = typeById[tid]?.name;
+          if (!typeName) return;
+          const entries = normalizeCellEntries(cell, {
+            source:'legacy',
+            typeName,
+            rowLimit:typeName,
+            colLimit:WD[relDay] || '',
+          });
+          entries.forEach((entry, idx)=>{
+            const xKey = entry.absSlotKey ? `${relDay}|${typeName}|${entry.absSlotKey}` : '';
+            const cKey = Number.isFinite(entry.absRow) && Number.isFinite(entry.absCol)
+              ? `${relDay}|${typeName}|${entry.absRow},${entry.absCol}`
+              : '';
+            const itemId = `${dateStr}|${pid}|${tid}|${entry.id || idx}`;
+            const item = {
+              itemId,
+              exactKey: xKey,
+              coordKey: cKey,
+              personName,
+              pid,
+              tid,
+              entryId: entry.id,
+              absSlotKey: entry.absSlotKey || null,
+              absRow: Number.isFinite(entry.absRow) ? entry.absRow : null,
+              absCol: Number.isFinite(entry.absCol) ? entry.absCol : null,
+            };
+            if (xKey) pushPool(exact, xKey, item);
+            if (cKey) pushPool(coord, cKey, item);
+          });
+        });
+      });
+    });
+    const sortItems = arr => arr.sort((a,b)=>{
+      const ar = Number.isFinite(a.absRow) ? a.absRow : Number.POSITIVE_INFINITY;
+      const br = Number.isFinite(b.absRow) ? b.absRow : Number.POSITIVE_INFINITY;
+      const ac = Number.isFinite(a.absCol) ? a.absCol : Number.POSITIVE_INFINITY;
+      const bc = Number.isFinite(b.absCol) ? b.absCol : Number.POSITIVE_INFINITY;
+      if (ar !== br) return ar - br;
+      if (ac !== bc) return ac - bc;
+      return a.personName.localeCompare(b.personName, 'zh');
+    });
+    Object.values(exact).forEach(sortItems);
+    Object.values(coord).forEach(sortItems);
+    return { exact, coord };
+  }
+
+  function assignTemplateSlots(templateObj, weekDatesArr) {
+    const previewMeta = templateObj?.preview;
+    if (!previewMeta?.cellSlotMap) return null;
+    const previewSlotEntries = Object.entries(previewMeta.cellSlotMap)
+      .map(([key, slot])=>({ key, ...slot }))
+      .sort((a,b)=>{
+        const [ar,ac]=a.key.split(',').map(Number);
+        const [br,bc]=b.key.split(',').map(Number);
+        return ar-br || ac-bc;
+      });
+    const pools = buildWeekRecordPools(weekDatesArr || []);
+    // Fallback baseline queue only for legacy templates without per-slot personName.
+    const fallbackPools = {};
+    Object.entries(templateObj?.data || {}).forEach(([wd, dayMap])=>{
+      fallbackPools[wd] = fallbackPools[wd] || {};
+      Object.entries(dayMap || {}).forEach(([personName, typeMap])=>{
+        Object.entries(typeMap || {}).forEach(([typeName, cnt])=>{
+          fallbackPools[wd][typeName] = fallbackPools[wd][typeName] || [];
+          for (let i=0; i<(cnt||0); i++) fallbackPools[wd][typeName].push(personName);
+        });
+      });
+      Object.values(fallbackPools[wd]).forEach(arr=>arr.sort((a,b)=>a.localeCompare(b,'zh')));
+    });
+    const removePoolItem = (bucket, key, itemId) => {
+      const queue = bucket[key];
+      if (!queue?.length) return;
+      const idx = queue.findIndex(it=>it.itemId===itemId);
+      if (idx >= 0) queue.splice(idx, 1);
+    };
+    const byKey = {};
+    for (const slot of previewSlotEntries) {
+      const baselineFromSlot = slot.personName || null;
+      const fallbackQueue = fallbackPools[slot.weekday]?.[slot.typeName] || [];
+      const baselinePerson = baselineFromSlot || (fallbackQueue.length ? fallbackQueue.shift() : null);
+      const slotAbsKey = slot.slotKey || slot.key || '';
+      const exactKey = slotAbsKey ? `${slot.weekday}|${slot.typeName}|${slotAbsKey}` : '';
+      const coordKey = Number.isFinite(slot.row) && Number.isFinite(slot.col)
+        ? `${slot.weekday}|${slot.typeName}|${slot.row},${slot.col}`
+        : '';
+      const exactQueue = exactKey ? (pools.exact[exactKey] || []) : [];
+      let picked = exactQueue.length ? exactQueue.shift() : null;
+      if (picked) removePoolItem(pools.coord, picked.coordKey, picked.itemId);
+      if (!picked) {
+        const coordQueue = coordKey ? (pools.coord[coordKey] || []) : [];
+        picked = coordQueue.length ? coordQueue.shift() : null;
+      }
+      const currentPerson = picked?.personName || null;
+      const state = currentPerson
+        ? (currentPerson === baselinePerson ? 'original' : 'changed')
+        : (baselinePerson ? 'removed' : 'empty');
+      byKey[slot.key] = { ...slot, baselinePerson, currentPerson, currentRef:picked, state };
+    }
+    return { byKey, slots: previewSlotEntries };
+  }
+
+  function buildRevisionSnapshot(templateObj, weekDatesArr) {
+    return assignTemplateSlots(templateObj, weekDatesArr);
+  }
+
+  function buildRawLikeWorksheet(templateObj, slotByKey = null) {
+    const preview = templateObj?.preview;
+    if (!preview?.rawGrid) return null;
+    const aoa = preview.rawGrid.map((row, r)=>row.map((cell, c)=>{
+      if (slotByKey) {
+        const key = `${r},${c}`;
+        const slotEntry = slotByKey[key];
+        // Only substitute cells that are actual person slots
+        if (slotEntry !== undefined) return slotEntry.currentPerson || '';
+      }
+      return cell?.val || '';
+    }));
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!merges'] = (preview.rawMerges || []).map(m=>({
+      s:{r:m.s.r,c:m.s.c},
+      e:{r:m.e.r,c:m.e.c},
+    }));
+    const maxCols = Math.max(...aoa.map(row=>row.length), 0);
+    ws['!cols'] = Array.from({length:maxCols}, (_, idx)=>{
+      let longest = 8;
+      aoa.forEach(row=>{ longest = Math.max(longest, String(row[idx] || '').length); });
+      return { wch: Math.max(8, Math.min(18, longest + 2)) };
+    });
+    return ws;
+  }
 
   /* ── Export Excel ── */
   function exportExcel(mode, rangeStart, rangeEnd, bonusHours = {}) {
@@ -251,9 +709,10 @@ function App() {
         for (const p of personnel) {
           const dr = records?.[d]?.[p.id];
           if (!dr) continue;
+          const dayCounts = types.map(t=>countCell(dr[t.id]));
           const row = [p.name, d,
-            ...types.map(t=>dr[t.id]||0),
-            ...types.map(t=>(dr[t.id]||0)*t.hours),
+            ...dayCounts,
+            ...types.map((t, idx)=>dayCounts[idx]*t.hours),
             dayHours(d,p.id)];
           rows.push(row);
         }
@@ -264,12 +723,95 @@ function App() {
       }
     }
 
+    /* Sheet(s): 修订视图格式 */
+    if (mode==='revise') {
+      const weekMap = {};
+      for (const d of allDates) {
+        const mon = getMonday(new Date(d));
+        const key = fmt(mon);
+        const sun = addDays(mon,6);
+        if (!weekMap[key]) weekMap[key]={label:`${fmtMid(mon)}~${fmtMid(sun)}`, dates:weekDates(mon)};
+      }
+      const weekKeys = Object.keys(weekMap).sort();
+      if (!weekKeys.length) {
+        alert('所选时间段内没有可导出的周记录');
+        return;
+      }
+      const validWeeks = [];
+      weekKeys.forEach((key, idx)=>{
+        const tplId = weekTemplateMap?.[key];
+        const tpl = templateLibrary.find(t=>t.id===tplId);
+        if (!tpl?.preview?.rawGrid || !tpl?.preview?.cellSlotMap) return;
+        const snapshot = buildRevisionSnapshot(tpl, weekMap[key].dates);
+        const ws = buildRawLikeWorksheet(tpl, snapshot?.byKey || {});
+        if (!ws) return;
+        validWeeks.push(key);
+        const label = weekMap[key].label.replace(/[~]/g, '-');
+        XLSX.utils.book_append_sheet(wb, ws, `修订_${idx+1}_${label}`);
+      });
+      if (!validWeeks.length) {
+        alert('所选时间段对应周未指派可用模板（或模板不含原始视图），无法导出修订视图格式');
+        return;
+      }
+    }
+
     XLSX.writeFile(wb, `工时统计_${fmt(new Date())}.xlsx`);
   }
 
   function _styleSheet(ws, colCount) {
     // Set column widths
     ws['!cols'] = [{ wch:10 }, ...Array(colCount).fill({ wch:8 })];
+  }
+
+  function normalizeTemplateObject(input, fallbackName = '工时模板') {
+    if (!input || typeof input !== 'object') return null;
+    const id = input.id || `tpl_${Date.now()}_${Math.floor(Math.random()*100000)}`;
+    const name = String(input.name || fallbackName).trim() || fallbackName;
+    const data = input.data && typeof input.data === 'object' ? input.data : {};
+    const preview = input.preview && typeof input.preview === 'object' ? input.preview : null;
+    return { ...input, id, name, data, preview, updatedAt: Date.now() };
+  }
+
+  function saveTemplateToLibrary(inputTemplate, opts = {}) {
+    const tpl = normalizeTemplateObject(inputTemplate);
+    if (!tpl) return null;
+    const selectAfterSave = opts.selectAfterSave !== false;
+    setTemplateLibrary(prev=>{
+      const idx = prev.findIndex(t=>t.id===tpl.id);
+      if (idx >= 0) {
+        const merged = { ...prev[idx], ...tpl, id: prev[idx].id, createdAt: prev[idx].createdAt || Date.now() };
+        const next = [...prev];
+        next[idx] = merged;
+        return next;
+      }
+      return [...prev, { ...tpl, createdAt: Date.now() }];
+    });
+    if (selectAfterSave) setSelectedTemplateId(tpl.id);
+    return tpl;
+  }
+
+  function assignTemplateToWeek(templateId, weekStart = currentWeekStart) {
+    if (!templateId) return;
+    setWeekTemplateMap(prev=>({ ...prev, [weekStart]: templateId }));
+  }
+
+  function unassignTemplateFromWeek(weekStart = currentWeekStart) {
+    setWeekTemplateMap(prev=>{
+      const next = { ...prev };
+      delete next[weekStart];
+      return next;
+    });
+  }
+
+  function deleteTemplate(templateId) {
+    if (!templateId) return;
+    setTemplateLibrary(prev=>prev.filter(t=>t.id!==templateId));
+    setWeekTemplateMap(prev=>{
+      const next = {};
+      Object.entries(prev || {}).forEach(([k,v])=>{ if (v !== templateId) next[k]=v; });
+      return next;
+    });
+    if (selectedTemplateId === templateId) setSelectedTemplateId('');
   }
 
   /* ── Import Records ── */
@@ -303,7 +845,9 @@ function App() {
             if (cnt>0) {
               newRec[date]=newRec[date]||{};
               newRec[date][person.id]=newRec[date][person.id]||{};
-              newRec[date][person.id][t.id]=cnt;
+              const arr = [];
+              for (let k=0; k<cnt; k++) arr.push(makeEntryByTypeId(t.id, { source:'import', rowLimit:t.name, colLimit:WD[new Date(date).getDay()===0?6:new Date(date).getDay()-1] }));
+              newRec[date][person.id][t.id]=arr;
               count++;
             }
           });
@@ -316,68 +860,77 @@ function App() {
     e.target.value='';
   }
 
-  /* ── Template import ── */
-  function handleImportTemplate(e) {
-    const file = e.target.files[0]; if(!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      try {
-        const wb = XLSX.read(ev.target.result, {type:'binary'});
-        const shName = wb.SheetNames.find(n=>n.includes('明细')) || wb.SheetNames[0];
-        const ws = wb.Sheets[shName];
-        const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:0});
-        if (rows.length < 2) { alert('表格格式不正确'); return; }
-        const hdr = rows[0];
-        const typeNames = types.map(t=>t.name);
-        const typeColIdxs = typeNames.map(n=>hdr.findIndex(h=>String(h).startsWith(n)&&String(h).endsWith('次)')));
-        // Parse dates, compute weekday offset (Mon=0..Sun=6)
-        const data = {}; // {relDay: {personName: {typeName: count}}}
-        let count = 0;
-        for (let i=1;i<rows.length;i++) {
-          const row = rows[i];
-          const name = String(row[0]||'').trim();
-          const dateStr = String(row[1]||'').trim();
-          if (!name||!dateStr||!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
-          const d = new Date(dateStr);
-          const dow = d.getDay(); // 0=Sun
-          const relDay = dow===0 ? 6 : dow-1; // Mon=0..Sun=6
-          if (!data[relDay]) data[relDay]={};
-          if (!data[relDay][name]) data[relDay][name]={};
-          types.forEach((t,j)=>{
-            const idx=typeColIdxs[j]; if(idx<0) return;
-            const cnt=parseInt(row[idx])||0;
-            if(cnt>0){ data[relDay][name][t.name]=cnt; count++; }
-          });
-        }
-        if (!count) { alert('未在模板中找到有效工时数据'); return; }
-        setTemplate({name: file.name.replace(/\.[^.]+$/,''), data});
-        alert(`✅ 模板「${file.name}」已缓存（${count} 条），切换到目标日期/周后点击「应用模板」覆盖`);
-      } catch(err) { alert('导入失败：'+err.message); }
-    };
-    reader.readAsBinaryString(file);
-    e.target.value='';
+  /* ── Template operations ── */
+  function replaceCurrentWeekTemplate() {
+    if (!selectedTemplate) return;
+    assignTemplateToWeek(selectedTemplate.id, currentWeekStart);
+    setShowDiff(true);
+    showToast(`已将 ${currentWeekStart} 指派为模板「${selectedTemplate.name}」，并自动开启差异显示。`, 'success');
   }
 
-  /* ── Apply template to current view ── */
-  function applyTemplate() {
-    if (!template) return;
+  function applyTemplateData() {
+    if (!selectedTemplate) return;
     const apply = () => {
+      assignTemplateToWeek(selectedTemplate.id, currentWeekStart);
       setRecords(prev => {
         const r = JSON.parse(JSON.stringify(prev));
+        const slotEntriesByRelDay = {};
+        const slotMap = selectedTemplate?.preview?.cellSlotMap || {};
+        Object.entries(slotMap)
+          .sort((a,b)=>{
+            const [ak,av] = a;
+            const [bk,bv] = b;
+            const ar = Number.isFinite(av?.row) ? av.row : parseInt(String(ak).split(',')[0],10);
+            const ac = Number.isFinite(av?.col) ? av.col : parseInt(String(ak).split(',')[1],10);
+            const br = Number.isFinite(bv?.row) ? bv.row : parseInt(String(bk).split(',')[0],10);
+            const bc = Number.isFinite(bv?.col) ? bv.col : parseInt(String(bk).split(',')[1],10);
+            return ar-br || ac-bc;
+          })
+          .forEach(([slotKey, slot])=>{
+          if (!slot?.personName || !slot?.typeName) return;
+          const relDay = Number(slot.weekday);
+          if (!Number.isFinite(relDay)) return;
+          slotEntriesByRelDay[relDay] = slotEntriesByRelDay[relDay] || {};
+          slotEntriesByRelDay[relDay][slot.personName] = slotEntriesByRelDay[relDay][slot.personName] || {};
+          const typeBucket = slotEntriesByRelDay[relDay][slot.personName];
+          typeBucket[slot.typeName] = typeBucket[slot.typeName] || [];
+          typeBucket[slot.typeName].push(normalizeEntry({
+            source: 'template',
+            absSlotKey: slot.slotKey || slotKey,
+            absRow: Number.isFinite(slot.row) ? slot.row : null,
+            absCol: Number.isFinite(slot.col) ? slot.col : null,
+            rowLimit: slot.rowLimit || slot.typeName,
+            colLimit: slot.colLimit || WD[relDay] || '',
+            typeName: slot.typeName,
+          }));
+          });
         const applyDay = (dateStr, relDay) => {
-          const dayData = template.data[relDay];
+          const dayData = selectedTemplate.data[relDay];
+          delete r[dateStr];
           if (!dayData) return;
+          const nextDay = {};
           for (const p of personnel) {
             const pData = dayData[p.name];
             if (!pData) continue;
-            r[dateStr] = r[dateStr] || {};
-            r[dateStr][p.id] = r[dateStr][p.id] || {};
+            const nextPerson = {};
             for (const t of types) {
-              if (pData[t.name] != null) {
-                r[dateStr][p.id][t.id] = pData[t.name];
+              const cnt = pData[t.name] || 0;
+              if (!(cnt > 0)) continue;
+              const slotList = slotEntriesByRelDay?.[relDay]?.[p.name]?.[t.name] || [];
+              const entries = slotList.slice(0, cnt).map(entry=>normalizeEntry(entry, { source:'template', typeName:t.name }));
+              while (entries.length < cnt) {
+                entries.push(normalizeEntry({
+                  source:'template',
+                  rowLimit:t.name,
+                  colLimit:WD[relDay] || '',
+                  typeName:t.name,
+                }));
               }
+              nextPerson[t.id] = entries;
             }
+            if (Object.keys(nextPerson).length) nextDay[p.id] = nextPerson;
           }
+          if (Object.keys(nextDay).length) r[dateStr] = nextDay;
         };
         if (view==='week') {
           wDates.forEach((d,i) => applyDay(fmt(d), i));
@@ -388,10 +941,15 @@ function App() {
         }
         return r;
       });
+      setWeekDayLocks(prev=>{
+        const next = { ...(prev || {}) };
+        delete next[currentWeekStart];
+        return next;
+      });
       setModal(null);
+      showToast(`已写入模板「${selectedTemplate.name}」到${view==='week'?'当前周':'当天'}记录。`, 'success');
     };
-    setConfirmCb(()=>apply);
-    setModal('confirm-tpl');
+    apply();
   }
 
   /* ── Visibility helpers ── */
@@ -421,15 +979,56 @@ function App() {
 
   /* ── Clear records only ── */
   function clearAll() {
-    setConfirmCb(()=>()=>{ setRecords({}); setModal(null); });
-    setModal('confirm');
+    setModal('clear-records');
+  }
+
+  function clearRecordsByRange(rangeType, startDate, endDate) {
+    const allDates = Object.keys(records).sort();
+    if (!allDates.length) {
+      alert('暂无记录可清空');
+      setModal(null);
+      return;
+    }
+    let targetDates = allDates;
+    if (rangeType === 'custom') {
+      if (!startDate || !endDate || startDate > endDate) {
+        alert('请先选择有效的起止日期');
+        return;
+      }
+      targetDates = allDates.filter(d=>d>=startDate && d<=endDate);
+    }
+    if (!targetDates.length) {
+      alert('所选时间范围内没有可清空记录');
+      return;
+    }
+    const targetSet = new Set(targetDates);
+    const remainDates = allDates.filter(d=>!targetSet.has(d));
+    const remainWeekKeys = new Set(remainDates.map(d=>fmt(getMonday(new Date(d)))));
+    setRecords(prev=>{
+      const next = { ...prev };
+      targetDates.forEach(d=>{ delete next[d]; });
+      return next;
+    });
+    setWeekDayLocks(prev=>{
+      const next = {};
+      Object.entries(prev || {}).forEach(([weekKey, locked])=>{
+        if (remainWeekKeys.has(weekKey)) next[weekKey] = locked;
+      });
+      return next;
+    });
+    setModal(null);
+    alert(`已清空 ${targetDates.length} 天记录`);
   }
 
   /* ── Clear ALL data ── */
   function clearAllData() {
     setConfirmCb(()=>()=>{
       setRecords({}); setPersonnel([]); setTypes(DEF_TYPES);
-      setHiddenIds(new Set()); setTemplate(null);
+      setHiddenIds(new Set());
+      setTemplateLibrary([]);
+      setSelectedTemplateId('');
+      setWeekTemplateMap({});
+      setWeekDayLocks({});
       localStorage.removeItem('wh_hidden');
       setModal(null);
     });
@@ -466,23 +1065,56 @@ function App() {
 
         <div className="spacer"/>
 
-        {template && (
-          <div className="tpl-badge">
-            <span>📋</span>
-            <span className="tpl-name" title={template.name}>{template.name}</span>
-            <button className="btn btn-sm" style={{padding:'1px 7px',fontSize:'11px'}} onClick={applyTemplate}>应用模板</button>
-            <span style={{cursor:'pointer',fontSize:'12px',opacity:.7}} onClick={()=>setTemplate(null)}>✕</span>
+        <div className="header-template">
+          <div className="header-template-meta">
+            <span className="header-template-label">模板库</span>
+            <span className="header-template-week">{currentWeekStart}</span>
           </div>
-        )}
+          <div className="header-template-controls">
+            <select
+              className="header-template-select"
+              value={selectedTemplateId}
+              onChange={e=>setSelectedTemplateId(e.target.value)}
+            >
+              {templateLibrary.length ? templateLibrary.map(t=>(
+                <option key={t.id} value={t.id}>{t.name}</option>
+              )) : <option value="">暂无模板</option>}
+            </select>
+            <div className="header-template-actions">
+              <button className="btn btn-sm" disabled={!selectedTemplate} onClick={replaceCurrentWeekTemplate}>替换当前模板</button>
+              <button className="btn btn-sm btn-primary" disabled={!selectedTemplate} onClick={applyTemplateData}>写入模板数据</button>
+              <button
+                className="btn btn-sm btn-danger"
+                disabled={!selectedTemplate}
+                onClick={()=>{
+                  if (!selectedTemplate) return;
+                  if (window.confirm(`确认删除模板「${selectedTemplate.name}」？已指派周会自动取消指派。`)) {
+                    deleteTemplate(selectedTemplate.id);
+                  }
+                }}
+              >
+                删模板
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div className="sep"/>
         <button className="btn btn-sm" onClick={()=>setModal('types')}>⚙ 工时类型</button>
         <button className="btn btn-sm" onClick={()=>setModal('people')}>👥 人员</button>
         <input ref={importPplRef} type="file" accept=".xlsx,.xls,.csv" style={{display:'none'}}/>
         <input ref={importRecRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleImportRecords}/>
-        <input ref={importTplRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleImportTemplate}/>
         <button className="btn btn-sm" onClick={()=>importRecRef.current.click()}>📂 导入记录</button>
-        <button className="btn btn-sm" style={{color:'var(--yellow)',borderColor:'var(--yellow)'}} onClick={()=>importTplRef.current.click()}>📋 导入模板</button>
         <button className="btn btn-sm" style={{color:'var(--green)',borderColor:'var(--green)'}} onClick={()=>setModal('schedule')}>📅 排班转模板</button>
+        {currentTemplate && (
+          <button
+            className={`btn btn-sm header-diff-btn${showDiff?' diff-active-btn':''}`}
+            onClick={()=>setShowDiff(v=>!v)}
+            title={showDiff?'关闭差异对比':'与当前周模板对比差异'}
+          >
+            ⚡ {showDiff?'关闭差异':'显示差异'}
+          </button>
+        )}
         <button className="btn btn-sm btn-primary" onClick={()=>setModal('export')}>📊 导出</button>
         <button className="theme-btn" onClick={()=>setTheme(t=>t==='dark'?'light':'dark')} title="切换主题">
           {theme==='dark'?'☀️':'🌙'}
@@ -574,20 +1206,20 @@ function App() {
             </div>
             <div>类型 {types.length} 种 · 记录 {Object.keys(records).length} 天</div>
             {/* Template status */}
-            {template ? (
+            {currentTemplate ? (
               <div style={{display:'flex',alignItems:'center',gap:'4px',marginTop:'4px',
                 padding:'4px 6px',background:'var(--yellow)15',borderRadius:'var(--radius)',
                 border:'1px solid var(--yellow)33',fontSize:'11px'}}>
                 <span style={{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
-                  color:'var(--yellow)'}} title={template.name}>📋 {template.name}</span>
+                  color:'var(--yellow)'}} title={currentTemplate.name}>📋 {currentTemplate.name}</span>
                 <button className="btn btn-sm" style={{fontSize:'10px',padding:'1px 5px'}}
                   onClick={()=>setModal('view-tpl')}>查看</button>
                 <button className="btn btn-sm" style={{fontSize:'10px',padding:'1px 5px',
                   color:'var(--red)',borderColor:'var(--red)'}}
-                  onClick={()=>setTemplate(null)}>清除</button>
+                  onClick={()=>unassignTemplateFromWeek()}>取消指派</button>
               </div>
             ) : (
-              <div style={{fontSize:'11px',color:'var(--border)',marginTop:'2px'}}>无缓存模板</div>
+              <div style={{fontSize:'11px',color:'var(--border)',marginTop:'2px'}}>当前周未指派模板</div>
             )}
             <div className="sidebar-foot-actions" style={{marginTop:'6px'}}>
               <button className="btn btn-sm" style={{flex:1,fontSize:'11px'}} onClick={()=>setModal('people')}>+ 人员</button>
@@ -598,7 +1230,7 @@ function App() {
         </div>
 
         {/* ── Main ── */}
-        <div className="main">
+        <div className="main" ref={mainRef} onWheel={handleMainWheel}>
           {/* Types summary bar */}
           <div className="info-bar">
             {view==='day' && (<>
@@ -615,23 +1247,16 @@ function App() {
               <span className="info-item">
                 模式:
                 <span className="week-mode-toggle">
-                  <button className={weekMode==='stats'?'active':''} onClick={()=>setWeekMode('stats')}>统计</button>
-                  <button className={weekMode==='revise'?'active':''} onClick={()=>setWeekMode('revise')}>修订</button>
+                  <button className={weekMode==='stats'?'active':''} onClick={()=>switchWeekMode('stats')}>统计</button>
+                  <button className={weekMode==='revise'?'active':''} onClick={()=>switchWeekMode('revise')}>修订</button>
                 </span>
               </span>
               <span className="info-item">总工时: <span className="info-val" style={{color:'var(--yellow)'}}>
                 {tablePersonnel.reduce((s,p)=>s+weekHours(p.id),0).toFixed(1)} h
               </span></span>
+              {isCurrentWeekDayLocked && <span className="flow-badge todo">本周周修订锁定</span>}
             </>)}
             <span style={{marginLeft:'auto',display:'flex',gap:'6px',flexWrap:'wrap',alignItems:'center'}}>
-              {template && (
-                <button
-                  className={`btn btn-sm${showDiff?' diff-active-btn':''}`}
-                  onClick={()=>setShowDiff(v=>!v)}
-                  title={showDiff?'关闭差异对比':'与缓存模板对比差异'}>
-                  ⚡ {showDiff?'关闭差异':'显示差异'}
-                </button>
-              )}
               {types.map(t=>(
                 <span key={t.id} className="badge" style={{color:t.color,borderColor:t.color,background:t.color+'22'}}>
                   {t.name} {t.hours}h
@@ -643,48 +1268,79 @@ function App() {
           <WorkflowPanel
             personnelCount={personnel.length}
             typeCount={types.length}
-            hasTemplate={!!template}
+            hasTemplate={!!currentTemplate}
+            selectedTemplateReady={!!selectedTemplate}
             recordDays={stats.totalRecordDays}
             ruleCount={stats.aliasRuleCount + stats.parserRuleCount}
             view={view}
             weekMode={weekMode}
+            weekDayLocked={isCurrentWeekDayLocked}
             collapsed={flowCollapsed}
             onToggleCollapsed={()=>setFlowCollapsed(v=>!v)}
             setView={setView}
-            setWeekMode={setWeekMode}
+            setWeekMode={switchWeekMode}
             openPeople={()=>setModal('people')}
             openTypes={()=>setModal('types')}
             openSchedule={()=>setModal('schedule')}
             openExport={()=>setModal('export')}
-            applyTemplate={template ? applyTemplate : null}
+            applyTemplateData={selectedTemplate ? applyTemplateData : null}
+            replaceTemplate={selectedTemplate ? replaceCurrentWeekTemplate : null}
           />
 
           {view==='day'
             ? <DayView personnel={diffPersonnel} types={types} dateStr={curStr}
                 getCount={getCount} update={update} dayHours={dayHours}
-                showDiff={showDiff} getTplCount={getTplCount} curDate={curDate}/>
+                showDiff={showDiff} curDate={curDate}
+                getTplEntries={getTplEntries}
+                getEntries={getEntries} removeEntry={removeEntryById} moveEntry={moveEntryToPerson}
+                allPersonnel={personnel}/>
             : <WeekView personnel={diffPersonnel} types={types} wDates={wDates}
                 dayHours={dayHours} setCurDate={setCurDate} setView={setView}
-                showDiff={showDiff} getTplCount={getTplCount} template={template}
-                records={records} update={update} weekMode={weekMode} setWeekMode={setWeekMode}/>
+                showDiff={showDiff} getTplCount={getTplCount} template={currentTemplate}
+                records={records}
+                setRecords={setRecords}
+                weekMode={weekMode} setWeekMode={switchWeekMode}
+                weekDayLocked={isCurrentWeekDayLocked}/>
           }
         </div>
       </div>
 
+      {toast && (
+        <div
+          style={{
+            position:'fixed',
+            right:'18px',
+            bottom:'18px',
+            zIndex:3000,
+            minWidth:'220px',
+            maxWidth:'min(78vw, 520px)',
+            padding:'10px 12px',
+            borderRadius:'10px',
+            border:`1px solid ${toast.type==='success' ? 'var(--green)' : 'var(--border)'}`,
+            background:'var(--surface)',
+            color:'var(--text)',
+            boxShadow:'0 10px 26px rgba(0,0,0,.24)',
+            fontSize:'12px',
+            lineHeight:1.5
+          }}
+        >
+          {toast.msg}
+        </div>
+      )}
+
       {/* ── Modals ── */}
       {modal==='types'      && <TypeModal   types={types}   setTypes={setTypes}   close={()=>setModal(null)}/>}
       {modal==='people'     && <PeopleModal personnel={personnel} setPersonnel={setPersonnel} close={()=>setModal(null)}/>}
-      {modal==='export'     && <ExportModal onExport={exportExcel} allDates={Object.keys(records).sort()} close={()=>setModal(null)} personnel={personnel} dayHours={dayHours}/>}
-      {modal==='confirm'    && <ConfirmModal msg="确认清空所有记录？此操作不可撤销。" onOk={confirmCb} close={()=>setModal(null)}/>}
+      {modal==='export'     && <ExportModal onExport={exportExcel} allDates={Object.keys(records).sort()} close={()=>setModal(null)} personnel={personnel} dayHours={dayHours} weekTemplateMap={weekTemplateMap} templateLibrary={templateLibrary}/>}
+      {modal==='clear-records' && <ClearRecordsModal allDates={Object.keys(records).sort()} onConfirm={clearRecordsByRange} close={()=>setModal(null)}/>}
       {modal==='confirm-all'&& <ConfirmModal msg="将清空全部数据：所有工时记录、人员名单（工时类型恢复默认）。此操作不可撤销！" onOk={confirmCb} close={()=>setModal(null)} okLabel="全部清空"/>}
-      {modal==='confirm-tpl'&& <ConfirmModal msg={`将用模板「${template?.name}」覆盖当前${view==='week'?'一周':'一天'}的工时数据，已有记录将被替换。确认？`} onOk={confirmCb} close={()=>setModal(null)} okLabel="应用"/>}
-      {modal==='schedule'   && <ScheduleImportModal personnel={personnel} types={types} initialRules={scheduleRules} onSaveRules={setScheduleRules} onSave={tpl=>{setTemplate(tpl);setModal(null);}} close={()=>setModal(null)}/>}
-      {modal==='view-tpl'   && <TemplateViewModal template={template} types={types} onClear={()=>{setTemplate(null);setModal(null);}} close={()=>setModal(null)}/>}
+      {modal==='schedule'   && <ScheduleImportModal personnel={personnel} types={types} initialRules={scheduleRules} onSaveRules={setScheduleRules} onSave={tpl=>{ const saved = saveTemplateToLibrary(tpl); setModal(null); showToast(`模板「${saved?.name || ''}」已保存到模板库。`, 'success'); }} close={()=>setModal(null)}/>}
+      {modal==='view-tpl'   && <TemplateViewModal template={currentTemplate} onClear={()=>{unassignTemplateFromWeek();setModal(null);}} close={()=>setModal(null)}/>}
     </div>
   );
 }
 
-function WorkflowPanel({ personnelCount, typeCount, hasTemplate, recordDays, ruleCount, view, weekMode, collapsed, onToggleCollapsed, setView, setWeekMode, openPeople, openTypes, openSchedule, openExport, applyTemplate }) {
+function WorkflowPanel({ personnelCount, typeCount, hasTemplate, selectedTemplateReady, recordDays, ruleCount, view, weekMode, weekDayLocked, collapsed, onToggleCollapsed, setView, setWeekMode, openPeople, openTypes, openSchedule, openExport, applyTemplateData, replaceTemplate }) {
   const cards = [
     {
       key:'people',
@@ -717,10 +1373,10 @@ function WorkflowPanel({ personnelCount, typeCount, hasTemplate, recordDays, rul
       key:'apply',
       step:'04',
       title:'套用并校对',
-      desc:'先在按周-修订模式套用模板并替换人员，再切到按天逐格核对统计差异。',
-      meta: hasTemplate ? `模板已缓存，当前周模式：${weekMode==='revise'?'修订':'统计'}` : '尚未缓存模板',
-      status: hasTemplate ? 'active' : 'todo',
-      action:<div className="flow-actions">{applyTemplate && <button className="btn btn-sm" onClick={applyTemplate}>应用模板</button>}<button className="btn btn-sm" onClick={()=>{ setView('week'); setWeekMode('revise'); }}>进入周修订</button><button className="btn btn-sm" onClick={()=>setView(view==='day'?'week':'day')}>{view==='day'?'切到按周':'切到按天'}</button></div>,
+      desc:'先指派当前周模板（仅替换对比基线），再按需写入模板数据；最后进入周修订并回按天核对差异。',
+      meta: hasTemplate ? `当前周已指派模板，模式：${weekMode==='revise'?'修订':'统计'}` : '当前周尚未指派模板',
+      status: hasTemplate || selectedTemplateReady ? 'active' : 'todo',
+      action:<div className="flow-actions">{replaceTemplate && <button className="btn btn-sm" onClick={replaceTemplate}>替换当前模板</button>}{applyTemplateData && <button className="btn btn-sm btn-primary" onClick={applyTemplateData}>写入模板数据</button>}<button className="btn btn-sm" disabled={weekDayLocked} onClick={()=>{ setView('week'); setWeekMode('revise'); }}>{weekDayLocked?'周修订已锁定':'进入周修订'}</button><button className="btn btn-sm" onClick={()=>setView(view==='day'?'week':'day')}>{view==='day'?'切到按周':'切到按天'}</button></div>,
     },
     {
       key:'export',
@@ -744,7 +1400,7 @@ function WorkflowPanel({ personnelCount, typeCount, hasTemplate, recordDays, rul
         </div>
         <div className="flow-head-actions">
           <div className="flow-actions">
-            <span className={`flow-badge ${hasTemplate ? 'done' : 'todo'}`}>{hasTemplate ? '模板已缓存' : '尚无模板'}</span>
+            <span className={`flow-badge ${hasTemplate ? 'done' : 'todo'}`}>{hasTemplate ? '当前周已指派模板' : '当前周无模板'}</span>
             <span className={`flow-badge ${recordDays ? 'active' : 'todo'}`}>{recordDays ? `${recordDays} 天记录` : '暂无记录'}</span>
           </div>
           <button className={`flow-toggle ${collapsed?'collapsed':''}`} onClick={onToggleCollapsed}>
@@ -793,21 +1449,110 @@ function WorkflowPanel({ personnelCount, typeCount, hasTemplate, recordDays, rul
 }
 
 /* ═══ Day View ══════════════════════════════════════════════════════════════ */
-function DayView({ personnel, types, dateStr, getCount, update, dayHours, showDiff, getTplCount, curDate }) {
+function DayView({ personnel, types, dateStr, getCount, update, dayHours, showDiff, getTplEntries, curDate, getEntries, removeEntry, moveEntry, allPersonnel }) {
   if (!personnel.length) return (
     <div className="empty"><div className="icon">👥</div><p>暂无人员，点击左下角「+ 人员」或「导入人员」</p></div>
   );
   if (!types.length) return (
     <div className="empty"><div className="icon">⚙</div><p>暂无工时类型，请先在「工时类型」中添加</p></div>
   );
+  const [activeMoveCardKey, setActiveMoveCardKey] = useState('');
+  const [moveQuery, setMoveQuery] = useState('');
+  const [moveEditorPos, setMoveEditorPos] = useState({ top: 0, left: 0 });
+  const dayMoveInputRef = useRef(null);
   const d = curDate ? curDate : new Date(dateStr);
   const relDay = d.getDay()===0 ? 6 : d.getDay()-1;
 
-  function diffBadge(delta) {
-    if (!showDiff) return null;
-    const cls = delta>0?'pos':delta<0?'neg':'zero';
-    const label = delta>0?`+${delta}`:delta<0?`${delta}`:'=';
-    return <span className={`diff-badge ${cls}`}>{label}</span>;
+  useEffect(()=>{
+    setActiveMoveCardKey('');
+    setMoveQuery('');
+  },[dateStr]);
+
+  useEffect(()=>{
+    if (activeMoveCardKey && dayMoveInputRef.current) dayMoveInputRef.current.focus();
+  },[activeMoveCardKey]);
+
+  useEffect(()=>{
+    if (!activeMoveCardKey) return;
+    const handleReflow = () => closeMoveEditor();
+    window.addEventListener('resize', handleReflow);
+    window.addEventListener('scroll', handleReflow, true);
+    return () => {
+      window.removeEventListener('resize', handleReflow);
+      window.removeEventListener('scroll', handleReflow, true);
+    };
+  },[activeMoveCardKey]);
+
+  function normKeyPart(s) {
+    if (typeof normStr === 'function') return normStr(s || '');
+    return String(s || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function entryToken(entry, typeName = '') {
+    if (entry?.absSlotKey) return `slot:${entry.absSlotKey}`;
+    return `rel:${normKeyPart(entry?.rowLimit || typeName)}|${normKeyPart(entry?.colLimit || '')}|${normKeyPart(entry?.typeName || typeName)}`;
+  }
+
+  function getEntryTitle(entry, fallbackTypeName = '') {
+    const rowLabel = normKeyPart(entry?.rowLimit || '');
+    const typeLabel = normKeyPart(entry?.typeName || fallbackTypeName || '');
+    if (rowLabel && rowLabel !== typeLabel) return rowLabel;
+    return rowLabel || typeLabel || fallbackTypeName;
+  }
+
+  const moveCandidates = useMemo(()=>{
+    const keyword = moveQuery.trim();
+    const source = keyword ? allPersonnel.filter(pp=>matchSearch(pp.name, keyword)) : allPersonnel;
+    return source.slice(0, 18);
+  },[allPersonnel, moveQuery]);
+
+  function closeMoveEditor() {
+    setActiveMoveCardKey('');
+    setMoveQuery('');
+  }
+
+  function openMoveEditor(cardKey, evt) {
+    const rect = evt?.currentTarget?.getBoundingClientRect?.();
+    const panelW = 280;
+    const gap = 8;
+    let left = rect ? rect.right + gap : 20;
+    let top = rect ? rect.top - 4 : 20;
+    if (left + panelW > window.innerWidth - 12) left = (rect ? rect.left : 20) - panelW - gap;
+    if (left < 8) left = 8;
+    const panelH = 260;
+    if (top + panelH > window.innerHeight - 8) top = Math.max(8, window.innerHeight - panelH - 8);
+    setMoveEditorPos({ top, left });
+    setActiveMoveCardKey(cardKey);
+    setMoveQuery('');
+  }
+
+  function moveCardEntry({ fromPid, toPid, tid, entryId }) {
+    if (!toPid || !entryId || fromPid === toPid) return;
+    moveEntry(dateStr, fromPid, toPid, tid, entryId, 'day');
+    closeMoveEditor();
+  }
+
+  function buildEntryDiff(currentEntries, baselineEntries, typeName) {
+    const baselinePool = {};
+    baselineEntries.forEach(entry=>{
+      const token = entryToken(entry, typeName);
+      baselinePool[token] = baselinePool[token] || [];
+      baselinePool[token].push(entry);
+    });
+    const currentCards = currentEntries.map(entry=>{
+      const token = entryToken(entry, typeName);
+      const queue = baselinePool[token];
+      if (queue?.length) {
+        queue.shift();
+        return { status:'same', entry };
+      }
+      return { status:'added', entry };
+    });
+    const removedCards = [];
+    Object.values(baselinePool).forEach(queue=>{
+      queue.forEach(entry=>removedCards.push({ status:'removed', entry }));
+    });
+    return { currentCards, removedCards };
   }
 
   return (
@@ -817,14 +1562,14 @@ function DayView({ personnel, types, dateStr, getCount, update, dayHours, showDi
           <tr>
             <th className="col-name">姓名</th>
             {types.map(t=>(
-              <th key={t.id} className="th-type" style={{borderTopColor:t.color,minWidth:'130px'}}>
+              <th key={t.id} className="th-type" style={{borderTopColor:t.color,minWidth:'190px'}}>
                 <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'2px'}}>
                   <span style={{color:t.color}}>{t.name}</span>
                   <span style={{fontSize:'11px',color:'var(--muted)',fontWeight:400}}>{t.hours} h / 次</span>
                 </div>
               </th>
             ))}
-            <th className="col-total" style={{minWidth:'75px'}}>合计(h)</th>
+            <th className="col-total" style={{minWidth:'85px'}}>合计(h)</th>
           </tr>
         </thead>
         <tbody>
@@ -835,19 +1580,109 @@ function DayView({ personnel, types, dateStr, getCount, update, dayHours, showDi
                 <td className="col-name">{p.name}</td>
                 {types.map(t => {
                   const cnt = getCount(dateStr, p.id, t.id);
-                  const tplCnt = showDiff ? getTplCount(relDay, p.name, t.name) : 0;
-                  const delta = cnt - tplCnt;
+                  const entries = getEntries(dateStr, p.id, t.id, {
+                    source:'legacy',
+                    colLimit:WD[relDay] || '',
+                    typeName:t.name,
+                  });
+                  const tplEntries = showDiff ? getTplEntries(relDay, p.name, t.name) : [];
+                  const { currentCards, removedCards } = showDiff
+                    ? buildEntryDiff(entries, tplEntries, t.name)
+                    : { currentCards: entries.map(entry=>({ status:'same', entry })), removedCards: [] };
                   return (
                     <td key={t.id}>
-                      <div className="counter-wrap" style={{position:'relative'}}>
-                        <button className="cbtn minus" disabled={cnt===0}
-                          onClick={()=>update(dateStr,p.id,t.id,-1)}>−</button>
-                        <div>
-                          <div className="cval" style={{color:cnt>0?t.color:'var(--muted)'}}>{cnt}</div>
-                          {cnt>0&&<div className="chours">{(cnt*t.hours).toFixed(1)}h</div>}
+                      <div className="day-cell">
+                        {(currentCards.length > 0 || removedCards.length > 0) && (
+                          <div className="day-entry-list">
+                            {currentCards.map(({ entry, status }, idx)=>{
+                              const cardKey = `${dateStr}|${p.id}|${t.id}|${entry.id || idx}`;
+                              const isMoveActive = activeMoveCardKey === cardKey;
+                              const targetCandidates = moveCandidates.filter(pp=>pp.id!==p.id);
+                              return (
+                              <div key={entry.id || `${idx}_${t.id}`} className={`day-entry-card ${status}`} style={{position:'relative'}}>
+                                <span className="day-entry-title">{getEntryTitle(entry, t.name)}</span>
+                                <button className="day-entry-del" title="删除该条记录" onClick={()=>removeEntry(dateStr, p.id, t.id, entry.id, 'day')}>✕</button>
+                                <button
+                                  className="day-entry-del"
+                                  title="移动该条记录"
+                                  onClick={e=>isMoveActive ? closeMoveEditor() : openMoveEditor(cardKey, e)}
+                                  style={{right:'28px'}}
+                                >⇄</button>
+                                {isMoveActive && (
+                                  <div
+                                    className="week-slot-editor day-entry-editor"
+                                    style={{position:'fixed',top:`${moveEditorPos.top}px`,left:`${moveEditorPos.left}px`,minWidth:'220px',maxWidth:'280px',zIndex:2000}}
+                                    onMouseDown={e=>e.stopPropagation()}
+                                    onClick={e=>e.stopPropagation()}
+                                  >
+                                    <div className="week-slot-editor-head">
+                                      <strong>{WD[relDay]} · {entry.typeName || t.name}</strong>
+                                      <span>行限位：{getEntryTitle(entry, t.name)}</span>
+                                    </div>
+                                    <input
+                                      ref={dayMoveInputRef}
+                                      className="inp"
+                                      value={moveQuery}
+                                      placeholder="输入目标人员，可搜姓名 / 拼音首字母"
+                                      onChange={e=>setMoveQuery(e.target.value)}
+                                      onKeyDown={e=>{
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          const exact = targetCandidates.find(pp=>pp.name===moveQuery.trim());
+                                          const fallback = targetCandidates[0];
+                                          const chosen = exact || fallback;
+                                          if (chosen) moveCardEntry({ fromPid:p.id, toPid:chosen.id, tid:t.id, entryId:entry.id });
+                                        } else if (e.key === 'Escape') {
+                                          e.preventDefault();
+                                          closeMoveEditor();
+                                        }
+                                      }}
+                                    />
+                                    <div className="week-slot-editor-suggestions">
+                                      {targetCandidates.map(pp=>(
+                                        <button
+                                          type="button"
+                                          key={pp.id}
+                                          className="week-slot-editor-chip"
+                                          onClick={()=>moveCardEntry({ fromPid:p.id, toPid:pp.id, tid:t.id, entryId:entry.id })}
+                                        >
+                                          {pp.name}
+                                        </button>
+                                      ))}
+                                      {!targetCandidates.length && <span className="week-slot-editor-empty">没有匹配人员</span>}
+                                    </div>
+                                    <div className="week-slot-editor-actions">
+                                      <button className="btn btn-sm" onClick={closeMoveEditor}>取消</button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )})}
+                            {removedCards.map(({ entry }, idx)=>(
+                              <div key={`removed_${entry.id || idx}_${t.id}`} className="day-entry-card removed">
+                                <span className="day-entry-title">{getEntryTitle(entry, t.name)}</span>
+                                <span className="day-entry-meta">已移出</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <div className="counter-wrap">
+                          <button
+                            className="cbtn minus"
+                            disabled={cnt===0}
+                            onClick={()=>{
+                              if (entries.length) removeEntry(dateStr, p.id, t.id, entries[entries.length-1].id, 'day');
+                              else update(dateStr,p.id,t.id,-1,'day');
+                            }}
+                          >
+                            −
+                          </button>
+                          <div>
+                            {entries.length===0 && <div className="cval" style={{color:cnt>0?t.color:'var(--muted)'}}>{cnt}</div>}
+                            {cnt>0&&<div className="chours">{(cnt*t.hours).toFixed(1)}h</div>}
+                          </div>
+                          <button className="cbtn plus" onClick={()=>update(dateStr,p.id,t.id,1,'day')}>+</button>
                         </div>
-                        <button className="cbtn plus" onClick={()=>update(dateStr,p.id,t.id,1)}>+</button>
-                        {showDiff && (cnt>0||tplCnt>0) && diffBadge(delta)}
                       </div>
                     </td>
                   );
@@ -866,7 +1701,7 @@ function DayView({ personnel, types, dateStr, getCount, update, dayHours, showDi
               const hrs = cnt * t.hours;
               return (
                 <td key={t.id} style={{fontFamily:"'SF Mono','Consolas',monospace",fontSize:'12px'}}>
-                  {cnt>0 ? <><span style={{color:t.color}}>{cnt}次</span><span style={{color:'var(--muted)'}}> / {hrs.toFixed(1)}h</span></> : <span style={{color:'var(--muted)'}}>—</span>}
+                  {cnt>0 ? <><span style={{color:t.color}}>{cnt}条</span><span style={{color:'var(--muted)'}}> / {hrs.toFixed(1)}h</span></> : <span style={{color:'var(--muted)'}}>—</span>}
                 </td>
               );
             })}
@@ -881,7 +1716,7 @@ function DayView({ personnel, types, dateStr, getCount, update, dayHours, showDi
 }
 
 /* ═══ Week View ═════════════════════════════════════════════════════════════ */
-function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, showDiff, getTplCount, template, records, update, weekMode, setWeekMode }) {
+function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, showDiff, getTplCount, template, records, setRecords, weekMode, setWeekMode, weekDayLocked }) {
   const wTotal = (pid) => wDates.reduce((s,d)=>s+dayHours(fmt(d),pid), 0);
   const colTotal = (d) => personnel.reduce((s,p)=>s+dayHours(fmt(d),p.id), 0);
   const grandTotal = () => wDates.reduce((s,d)=>s+colTotal(d), 0);
@@ -890,15 +1725,9 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
   const [revisePersonId, setRevisePersonId] = useState('');
   const [reviseZoom, setReviseZoom] = useState(1);
   const [selectedSlotKey, setSelectedSlotKey] = useState('');
-  const [slotOverrides, setSlotOverrides] = useState({});
   const reviseTopScrollRef = useRef(null);
   const reviseGridWrapRef = useRef(null);
   const reviseInlineInputRef = useRef(null);
-  const revisionCacheKey = useMemo(()=>{
-    const weekStart = fmt(wDates[0] || new Date());
-    const tplKey = template?.name || 'no-template';
-    return `wh_revision_overrides::${tplKey}::${weekStart}`;
-  },[template?.name, fmt(wDates[0] || new Date())]);
 
   function goDay(d) { setCurDate(new Date(d)); setView('day'); }
 
@@ -922,16 +1751,7 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
     setSelectedSlotKey('');
     setReviseQuery('');
     setRevisePersonId('');
-    setSlotOverrides(()=>{
-      if (!template) return {};
-      return loadLS(revisionCacheKey, {});
-    });
-  },[template, revisionCacheKey]);
-
-  useEffect(()=>{
-    if (!template) return;
-    localStorage.setItem(revisionCacheKey, JSON.stringify(slotOverrides || {}));
-  },[template, revisionCacheKey, slotOverrides]);
+  },[template]);
 
   useEffect(()=>{
     if (selectedSlotKey && reviseInlineInputRef.current) reviseInlineInputRef.current.focus();
@@ -947,6 +1767,7 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
   const personIndex = useMemo(()=>Object.fromEntries(personnel.map(p=>[p.name, p])), [personnel]);
   const typeIndexByName = useMemo(()=>Object.fromEntries(types.map(t=>[t.name, t])), [types]);
   const previewMeta = template?.preview || null;
+  const getSlotAbsKey = useCallback((slot)=>slot?.slotKey || slot?.key || null, []);
   const previewSlotEntries = useMemo(()=>{
     if (!previewMeta?.cellSlotMap) return [];
     return Object.entries(previewMeta.cellSlotMap)
@@ -958,110 +1779,210 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
   },[previewMeta]);
 
   const slotAssignments = useMemo(()=>{
-    if (!previewSlotEntries.length) return { byKey:{}, extrasByDay:{} };
-    const baselinePools = {};
+    if (!previewSlotEntries.length) return { byKey:{} };
+    const pidToName = Object.fromEntries(personnel.map(p=>[p.id, p.name]));
+    const typeById = Object.fromEntries(types.map(t=>[t.id, t]));
+    const poolsExact = {};
+    const poolsCoord = {};
+    const pushPool = (bucket, key, item) => {
+      bucket[key] = bucket[key] || [];
+      bucket[key].push(item);
+    };
+
+    wDates.forEach((d, relDay)=>{
+      const dateStr = fmt(d);
+      const dayRec = records?.[dateStr] || {};
+      Object.entries(dayRec).forEach(([pid, personRec])=>{
+        const personName = pidToName[pid];
+        if (!personName) return;
+        Object.entries(personRec || {}).forEach(([tid, cell])=>{
+          const typeName = typeById[tid]?.name;
+          if (!typeName) return;
+          const arr = Array.isArray(cell)
+            ? cell
+            : Array.from({length:Math.max(0, parseInt(cell, 10) || 0)}, ()=>({}));
+          arr.forEach((entry, idx)=>{
+            const itemId = `${dateStr}|${pid}|${tid}|${entry?.id || idx}`;
+            const exactKey = entry?.absSlotKey ? `${relDay}|${typeName}|${entry.absSlotKey}` : '';
+            const coordKey = Number.isFinite(entry?.absRow) && Number.isFinite(entry?.absCol)
+              ? `${relDay}|${typeName}|${entry.absRow},${entry.absCol}`
+              : '';
+            const item = {
+              itemId,
+              exactKey,
+              coordKey,
+              personName,
+              pid,
+              tid,
+              entryId: entry?.id || null,
+              absSlotKey: entry?.absSlotKey || null,
+              absRow: Number.isFinite(entry?.absRow) ? entry.absRow : null,
+              absCol: Number.isFinite(entry?.absCol) ? entry.absCol : null,
+            };
+            if (exactKey) pushPool(poolsExact, exactKey, item);
+            if (coordKey) pushPool(poolsCoord, coordKey, item);
+          });
+        });
+      });
+    });
+    const sortPool = arr => arr.sort((a,b)=>{
+      const ar = Number.isFinite(a.absRow) ? a.absRow : Number.POSITIVE_INFINITY;
+      const br = Number.isFinite(b.absRow) ? b.absRow : Number.POSITIVE_INFINITY;
+      const ac = Number.isFinite(a.absCol) ? a.absCol : Number.POSITIVE_INFINITY;
+      const bc = Number.isFinite(b.absCol) ? b.absCol : Number.POSITIVE_INFINITY;
+      if (ar !== br) return ar - br;
+      if (ac !== bc) return ac - bc;
+      return a.personName.localeCompare(b.personName, 'zh');
+    });
+    Object.values(poolsExact).forEach(sortPool);
+    Object.values(poolsCoord).forEach(sortPool);
+
+    // Fallback baseline queue for legacy templates lacking slot baseline personName.
+    const fallbackPools = {};
     Object.entries(template?.data || {}).forEach(([wd, dayMap])=>{
-      baselinePools[wd] = baselinePools[wd] || {};
+      fallbackPools[wd] = fallbackPools[wd] || {};
       Object.entries(dayMap || {}).forEach(([personName, typeMap])=>{
         Object.entries(typeMap || {}).forEach(([typeName, cnt])=>{
-          baselinePools[wd][typeName] = baselinePools[wd][typeName] || [];
-          for (let i=0; i<(cnt || 0); i++) baselinePools[wd][typeName].push(personName);
+          fallbackPools[wd][typeName] = fallbackPools[wd][typeName] || [];
+          for (let i=0; i<(cnt||0); i++) fallbackPools[wd][typeName].push(personName);
         });
       });
-      Object.values(baselinePools[wd]).forEach(arr=>arr.sort((a,b)=>a.localeCompare(b, 'zh')));
+      Object.values(fallbackPools[wd]).forEach(arr=>arr.sort((a,b)=>a.localeCompare(b,'zh')));
     });
+
+    const removePoolItem = (bucket, key, itemId) => {
+      const q = bucket[key];
+      if (!q?.length) return;
+      const idx = q.findIndex(it=>it.itemId===itemId);
+      if (idx >= 0) q.splice(idx, 1);
+    };
+
     const byKey = {};
     for (const slot of previewSlotEntries) {
-      const baseQueue = baselinePools[slot.weekday]?.[slot.typeName] || [];
-      const baselinePerson = baseQueue.length ? baseQueue.shift() : null;
-      const override = slotOverrides[slot.key];
-      let currentPerson, state;
-      if (override === 'empty') {
-        currentPerson = null;
-        state = 'removed';
-      } else if (typeof override === 'string') {
-        currentPerson = override;
-        state = override === baselinePerson ? 'original' : 'changed';
-      } else {
-        currentPerson = baselinePerson;
-        state = baselinePerson ? 'original' : 'empty';
+      const baselineFromSlot = slot.personName || null;
+      const fallbackQueue = fallbackPools[slot.weekday]?.[slot.typeName] || [];
+      const baselinePerson = baselineFromSlot || (fallbackQueue.length ? fallbackQueue.shift() : null);
+      const slotAbsKey = getSlotAbsKey(slot);
+      const exactKey = slotAbsKey ? `${slot.weekday}|${slot.typeName}|${slotAbsKey}` : '';
+      const coordKey = Number.isFinite(slot.r) && Number.isFinite(slot.c)
+        ? `${slot.weekday}|${slot.typeName}|${slot.r},${slot.c}`
+        : '';
+      const exactQueue = exactKey ? (poolsExact[exactKey] || []) : [];
+      let picked = exactQueue.length ? exactQueue.shift() : null;
+      if (picked) removePoolItem(poolsCoord, picked.coordKey, picked.itemId);
+      if (!picked) {
+        const coordQueue = coordKey ? (poolsCoord[coordKey] || []) : [];
+        picked = coordQueue.length ? coordQueue.shift() : null;
       }
-      byKey[slot.key] = { ...slot, baselinePerson, currentPerson, state };
+      const currentPerson = picked?.personName || null;
+      const state = currentPerson
+        ? (currentPerson === baselinePerson ? 'original' : 'changed')
+        : (baselinePerson ? 'removed' : 'empty');
+      byKey[slot.key] = { ...slot, baselinePerson, currentPerson, currentRef:picked, state };
     }
-
-    const slotConsumed = {};
-    Object.values(byKey).forEach(slot=>{
-      if (!slot.currentPerson) return;
-      slotConsumed[slot.weekday] = slotConsumed[slot.weekday] || {};
-      slotConsumed[slot.weekday][slot.typeName] = slotConsumed[slot.weekday][slot.typeName] || [];
-      slotConsumed[slot.weekday][slot.typeName].push(slot.currentPerson);
-    });
-
-    const recordCounts = {};
-    wDates.forEach((d, wd)=>{
-      const dayRec = records?.[fmt(d)] || {};
-      types.forEach(t=>{
-        personnel.forEach(p=>{
-          const cnt = dayRec[p.id]?.[t.id] || 0;
-          if (!cnt) return;
-          recordCounts[wd] = recordCounts[wd] || {};
-          recordCounts[wd][t.name] = recordCounts[wd][t.name] || {};
-          recordCounts[wd][t.name][p.name] = (recordCounts[wd][t.name][p.name] || 0) + cnt;
-        });
-      });
-    });
-
-    const extrasByDay = {};
-    Object.entries(recordCounts).forEach(([wd, typeMap])=>{
-      Object.entries(typeMap).forEach(([typeName, personMap])=>{
-        Object.entries(personMap).forEach(([personName, cnt])=>{
-          const consumed = (slotConsumed[wd]?.[typeName] || []).filter(name=>name===personName).length;
-          const extra = cnt - consumed;
-          if (extra <= 0) return;
-          extrasByDay[wd] = extrasByDay[wd] || [];
-          extrasByDay[wd].push({ personName, typeName, count: extra });
-        });
-      });
-    });
-    return { byKey, extrasByDay };
-  },[previewSlotEntries, slotOverrides, wDates, records, types, personnel, template]);
+    return { byKey };
+  },[previewSlotEntries, template, records, wDates, personnel, types, getSlotAbsKey]);
 
   if (!personnel.length) return (
     <div className="empty"><div className="icon">👥</div><p>暂无人员，请先导入</p></div>
   );
 
-  function removeByNames(dateStr, personName, typeName, count=1) {
+  function normalizeWeekCellEntries(cell) {
+    if (Array.isArray(cell)) return cell.map(e=>e && typeof e==='object' ? e : { id:uid(), source:'legacy' });
+    const n = Math.max(0, parseInt(cell, 10) || 0);
+    return Array.from({length:n}, ()=>({ id:uid(), source:'legacy' }));
+  }
+
+  function removeSlotEntry(r, dateStr, personName, typeName, slot, currentRef = null) {
     const person = personIndex[personName];
     const type = typeIndexByName[typeName];
     if (!person || !type) return;
-    for (let i=0; i<count; i++) update(dateStr, person.id, type.id, -1);
+    const arr = normalizeWeekCellEntries(r?.[dateStr]?.[person.id]?.[type.id]);
+    if (!arr.length) return;
+    let idx = -1;
+    if (currentRef?.entryId) idx = arr.findIndex(e=>e?.id===currentRef.entryId);
+    const slotAbsKey = getSlotAbsKey(slot);
+    if (idx < 0 && slotAbsKey) idx = arr.findIndex(e=>e?.absSlotKey===slotAbsKey);
+    if (idx < 0 && Number.isFinite(slot?.r) && Number.isFinite(slot?.c)) {
+      idx = arr.findIndex(e=>Number.isFinite(e?.absRow) && Number.isFinite(e?.absCol) && e.absRow===slot.r && e.absCol===slot.c);
+    }
+    if (idx < 0) return;
+    arr.splice(idx, 1);
+
+    if (!r[dateStr]) r[dateStr] = {};
+    if (!r[dateStr][person.id]) r[dateStr][person.id] = {};
+    if (arr.length) {
+      r[dateStr][person.id][type.id] = arr;
+    } else {
+      delete r[dateStr][person.id][type.id];
+      if (!Object.keys(r[dateStr][person.id]).length) delete r[dateStr][person.id];
+      if (!Object.keys(r[dateStr]).length) delete r[dateStr];
+    }
   }
 
-  function addByNames(dateStr, personName, typeName, count=1) {
+  function addSlotEntry(r, dateStr, personName, typeName, slot) {
     const person = personIndex[personName];
     const type = typeIndexByName[typeName];
     if (!person || !type) return;
-    for (let i=0; i<count; i++) update(dateStr, person.id, type.id, 1);
+    const arr = normalizeWeekCellEntries(r?.[dateStr]?.[person.id]?.[type.id]);
+    const slotAbsKey = getSlotAbsKey(slot);
+    arr.push({
+      id: uid(),
+      source: 'revision',
+      createdAt: Date.now(),
+      absSlotKey: slotAbsKey,
+      absRow: Number.isFinite(slot?.r) ? slot.r : null,
+      absCol: Number.isFinite(slot?.c) ? slot.c : null,
+      rowLimit: slot?.rowLimit || typeName,
+      colLimit: slot?.colLimit || WD[slot?.weekday] || '',
+      typeName,
+    });
+    r[dateStr] = r[dateStr] || {};
+    r[dateStr][person.id] = r[dateStr][person.id] || {};
+    r[dateStr][person.id][type.id] = arr;
   }
 
+  // Atomically update records for slot operations.
+  function applySlotRecordOps(ops) {
+    setRecords(prev => {
+      const r = JSON.parse(JSON.stringify(prev));
+      for (const op of ops) {
+        if (op.kind === 'remove' && op.personName) {
+          removeSlotEntry(r, op.dateStr, op.personName, op.typeName, op.slot, op.currentRef || null);
+        } else if (op.kind === 'add' && op.personName) {
+          addSlotEntry(r, op.dateStr, op.personName, op.typeName, op.slot);
+        }
+      }
+      return r;
+    });
+  }
+
+  // Three-click slot interaction:
+  //  Has currentPerson + not selected → click 1: clear (decrement record, set override=empty)
+  //  Empty/removed + not selected     → click 2: select for replacement
+  //  Already selected                 → click 3: restore baseline (undo override, fix records)
   function handleRevisionSlotClick(slot) {
-    const dateStr = fmt(wDates[slot.weekday]);
     setActiveDay(slot.weekday);
+    const dateStr = fmt(wDates[slot.weekday]);
+
     if (selectedSlotKey === slot.key) {
-      if (slot.currentPerson) removeByNames(dateStr, slot.currentPerson, slot.typeName, 1);
-      if (slot.baselinePerson) addByNames(dateStr, slot.baselinePerson, slot.typeName, 1);
-      setSlotOverrides(prev=>{ const next = {...prev}; delete next[slot.key]; return next; });
+      // Third click: restore baseline. Atomically: remove current, add baseline.
+      const ops = [];
+      if (slot.currentPerson) ops.push({kind:'remove', dateStr, personName:slot.currentPerson, typeName:slot.typeName, slot, currentRef:slot.currentRef});
+      if (slot.baselinePerson) ops.push({kind:'add', dateStr, personName:slot.baselinePerson, typeName:slot.typeName, slot});
+      if (ops.length) applySlotRecordOps(ops);
       setSelectedSlotKey('');
       return;
     }
 
     if (slot.currentPerson) {
-      removeByNames(dateStr, slot.currentPerson, slot.typeName, 1);
-      setSlotOverrides(prev=>({...prev, [slot.key]:'empty'}));
+      // First click: clear this slot
+      applySlotRecordOps([{kind:'remove', dateStr, personName:slot.currentPerson, typeName:slot.typeName, slot, currentRef:slot.currentRef}]);
       setSelectedSlotKey('');
       return;
     }
 
+    // Second click: slot is empty — select it
     setSelectedSlotKey(slot.key);
     setReviseQuery('');
     setRevisePersonId('');
@@ -1073,15 +1994,34 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
     const targetPerson = personnel.find(p=>p.id===personId);
     if (!slot || !targetPerson) return;
     const dateStr = fmt(wDates[slot.weekday]);
-    const targetTypeName = slot.typeName;
-    if (slot.currentPerson) {
-      removeByNames(dateStr, slot.currentPerson, targetTypeName, 1);
-    }
-    addByNames(dateStr, targetPerson.name, targetTypeName, 1);
-    setSlotOverrides(prev=>({...prev, [selectedSlotKey]: targetPerson.name}));
+    const ops = [];
+    if (slot.currentPerson) ops.push({kind:'remove', dateStr, personName:slot.currentPerson, typeName:slot.typeName, slot, currentRef:slot.currentRef});
+    ops.push({kind:'add', dateStr, personName:targetPerson.name, typeName:slot.typeName, slot});
+    applySlotRecordOps(ops);
     setSelectedSlotKey('');
     setReviseQuery('');
     setRevisePersonId('');
+  }
+
+  if (weekMode === 'revise' && weekDayLocked) {
+    return (
+      <div className="week-revision-shell">
+        <div className="empty" style={{border:'1px solid var(--border)',borderRadius:16,background:'var(--surface)'}}>
+          <div className="icon">🔒</div>
+          <p>本周已发生按天手工修改。为保证槽位定位准确，周修订已锁定。</p>
+        </div>
+        <div className="rule-block" style={{marginBottom:0}}>
+          <div className="rule-block-title">
+            <strong>周修订保护</strong>
+            <span style={{fontSize:'11px',color:'var(--muted)'}}>先完成当前周按天录入；如需周修订，请切换到其他周。</span>
+          </div>
+          <div className="week-revision-form-row">
+            <button className="btn" onClick={()=>setWeekMode('stats')}>回到周统计</button>
+            <button className="btn" onClick={()=>goDay(wDates[activeDay])}>切到按天</button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (weekMode === 'revise') {
@@ -1200,7 +2140,7 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
       const displayName = slot.currentPerson || '';
       const isChanged = slot.state === 'changed';
       const isRemoved = slot.state === 'removed';
-      const className = `week-revision-grid-cell${isRemoved?' removed':''}${showDiff && isChanged?' changed':''}${isSelected?' selected':''}`;
+        const className = `week-revision-grid-cell${isRemoved?' removed':''}${showDiff && isChanged?' changed':''}${showDiff && isRemoved?' removed-diff':''}${isSelected?' selected':''}`;
       const style = hitType ? {
         background: slot.currentPerson ? withAlpha(hitType.color,'22') : 'rgba(248,81,73,.08)',
         color: slot.currentPerson ? hitType.color : 'var(--red)',
@@ -1229,9 +2169,6 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
             <button className="btn btn-sm" onClick={()=>goDay(wDates[activeDay])}>切到按天</button>
             <button className="btn btn-sm" onClick={()=>setWeekMode('stats')}>回到周统计</button>
             <span className={`flow-badge ${showDiff ? 'active' : 'todo'}`}>{showDiff ? '差异已显示' : '可打开差异'}</span>
-            <span style={{fontSize:'11px',color:'var(--muted)'}}>
-              替换边框会随主题切换：深色主题用白框，浅色主题用黑框；空红框表示该槽位已被清空等待补人。点第 2 下后，搜索框会直接出现在槽位位置。
-            </span>
           </div>
           <div
             className="raw-grid-scroll-top"
@@ -1282,13 +2219,13 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
                           colSpan={span?.colSpan}
                           className={viewInfo.className + (isActiveDay ? ' active-day' : '')}
                           style={viewInfo.style}
-                          title={viewInfo.hint || (viewInfo.slot ? `${WD[viewInfo.slot.weekday]} · ${viewInfo.slot.typeName}` : val)}
+                          title={viewInfo.hint || (viewInfo.slot ? `${WD[viewInfo.slot.weekday]} · ${viewInfo.slot.typeName} · 模板人员：${viewInfo.slot.baselinePerson || '空槽位'}` : val)}
                           onClick={viewInfo.clickable ? ()=>handleRevisionSlotClick(viewInfo.slot) : undefined}
                         >
                           <div className="week-slot-cell-inner">
                             {viewInfo.label}
                             {viewInfo.isSelected && (
-                              <div className="week-slot-editor" onClick={e=>e.stopPropagation()}>
+                              <div className="week-slot-editor" onMouseDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
                                 <div className="week-slot-editor-head">
                                   <strong>{WD[viewInfo.slot.weekday]} · {viewInfo.slot.typeName}</strong>
                                   <span>模板：{viewInfo.slot.baselinePerson || '空槽位'}</span>
@@ -1551,7 +2488,7 @@ function PeopleModal({ personnel, setPersonnel, close }) {
 }
 
 /* ═══ Export Modal ══════════════════════════════════════════════════════════ */
-function ExportModal({ onExport, allDates, close, personnel, dayHours }) {
+function ExportModal({ onExport, allDates, close, personnel, dayHours, weekTemplateMap, templateLibrary }) {
   const [sel, setSel]       = useState('both');
   const [previewMode, setPreviewMode] = useState('day');
   const [rangeType, setRangeType] = useState('all'); // 'all' | 'custom'
@@ -1575,11 +2512,25 @@ function ExportModal({ onExport, allDates, close, personnel, dayHours }) {
     return map;
   },[filtered]);
   const weekKeys = Object.keys(weekMap).sort();
+  const canReviseExport = useMemo(()=>{
+    if (!weekKeys.length) return false;
+    const libById = Object.fromEntries((templateLibrary || []).map(t=>[t.id, t]));
+    return weekKeys.some(k=>{
+      const tid = weekTemplateMap?.[k];
+      const tpl = libById[tid];
+      return !!tpl?.preview?.rawGrid;
+    });
+  },[weekKeys, weekTemplateMap, templateLibrary]);
 
   function go() {
     onExport(sel, rangeType==='all'?null:startDate, rangeType==='all'?null:endDate, bonusHours);
     close();
   }
+
+  useEffect(()=>{
+    if (sel === 'revise') setPreviewMode('revise');
+    else if (previewMode === 'revise') setPreviewMode('day');
+  },[sel]);
 
   const dateInputStyle = {
     padding:'5px 8px',borderRadius:'var(--radius)',border:'1px solid var(--border)',
@@ -1591,6 +2542,31 @@ function ExportModal({ onExport, allDates, close, personnel, dayHours }) {
   }
 
   function renderPreviewTable(mode) {
+    if (mode === 'revise') {
+      return (
+        <div className="sched-table-wrap" style={{maxHeight:'260px', marginTop:'10px', padding:'12px'}}>
+          <div style={{fontSize:'12px',color:'var(--text)',fontWeight:700,marginBottom:'8px'}}>修订视图导出说明</div>
+          {!canReviseExport ? (
+            <div style={{fontSize:'12px',color:'var(--red)'}}>当前筛选范围内的周未指派可用模板（或模板不含原始视图数据），无法导出修订视图格式。</div>
+          ) : weekKeys.length ? (
+            <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
+              <div style={{fontSize:'12px',color:'var(--muted)'}}>
+                将按模板原始布局导出，每个自然周生成一个工作表，人员位置尽量与修订模式一致。
+              </div>
+              {weekKeys.map((k, idx)=>(
+                <div key={k} className="rule-chip">
+                  <strong style={{color:'var(--text)'}}>Sheet {idx+1}</strong>
+                  <span className="sp">→</span>
+                  <span>{weekMap[k].label}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{fontSize:'12px',color:'var(--muted)'}}>当前筛选范围内没有可导出的周记录。</div>
+          )}
+        </div>
+      );
+    }
     const cols = mode === 'day'
       ? filtered.map(d=>({ key:d, label:d.slice(5), getValue:pid=>dayHours(d,pid) }))
       : weekKeys.map(k=>({ key:k, label:weekMap[k].label, getValue:pid=>weekMap[k].dates.reduce((s,d)=>s+dayHours(d,pid),0) }));
@@ -1647,13 +2623,15 @@ function ExportModal({ onExport, allDates, close, personnel, dayHours }) {
             {v:'day',   label:'按日统计',       desc:'每列=一天'},
             {v:'week',  label:'按周汇总',       desc:'每列=一周'},
             {v:'both',  label:'日 + 周（推荐）', desc:'含两种统计 + 明细'},
+            {v:'revise',label:'修订视图格式',   desc:'按模板原始布局导出，每周一个 sheet', disabled:!canReviseExport},
           ].map(opt=>(
             <label key={opt.v} style={{display:'flex',alignItems:'center',gap:'8px',
               padding:'7px 10px',borderRadius:6,cursor:'pointer',
               background:sel===opt.v?'var(--accent)22':'transparent',
               border:`1px solid ${sel===opt.v?'var(--accent)':'var(--border)'}`,
-              marginBottom:'6px',fontSize:'13px'}}>
-              <input type="radio" value={opt.v} checked={sel===opt.v} onChange={()=>setSel(opt.v)}/>
+              marginBottom:'6px',fontSize:'13px',opacity:opt.disabled ? 0.6 : 1,
+              cursor:opt.disabled ? 'not-allowed' : 'pointer'}}>
+              <input type="radio" value={opt.v} checked={sel===opt.v} onChange={()=>setSel(opt.v)} disabled={opt.disabled}/>
               <div>
                 <div style={{fontWeight:600,color:sel===opt.v?'var(--accent)':'var(--text)'}}>{opt.label}</div>
                 <div style={{fontSize:'11px',color:'var(--muted)'}}>{opt.desc}</div>
@@ -1687,7 +2665,9 @@ function ExportModal({ onExport, allDates, close, personnel, dayHours }) {
         </div>
 
         <div style={{fontSize:'11px',color:'var(--muted)',marginBottom:'14px'}}>
-          导出前可先在预览里补奖励工时。奖励工时会出现在按天 / 按周统计表的总计前一列。
+          {sel==='revise'
+            ? '修订视图格式会保留模板原始布局，并按当前工时记录回填到对应槽位。'
+            : '导出前可先在预览里补奖励工时。奖励工时会出现在按天 / 按周统计表的总计前一列。'}
         </div>
         <div className="rule-block" style={{marginBottom:'14px'}}>
           <div className="rule-block-title">
@@ -1695,16 +2675,19 @@ function ExportModal({ onExport, allDates, close, personnel, dayHours }) {
             <div className="week-mode-toggle">
               <button className={previewMode==='day'?'active':''} onClick={()=>setPreviewMode('day')}>按天预览</button>
               <button className={previewMode==='week'?'active':''} onClick={()=>setPreviewMode('week')}>按周预览</button>
+              {canReviseExport && <button className={previewMode==='revise'?'active':''} onClick={()=>setPreviewMode('revise')}>修订视图</button>}
             </div>
           </div>
           <div style={{fontSize:'11px',color:'var(--muted)'}}>
-            当前预览会按所选时间范围展示每列工时，奖励工时可单独录入，不会写回日常记录，只影响本次导出。
+            {previewMode==='revise'
+              ? '修订视图预览展示将生成哪些按周工作表，以及它们会按模板原始布局导出。'
+              : '当前预览会按所选时间范围展示每列工时，奖励工时可单独录入，不会写回日常记录，只影响本次导出。'}
           </div>
           {renderPreviewTable(previewMode)}
         </div>
         <div style={{display:'flex',justifyContent:'flex-end',gap:'8px'}}>
           <button className="btn" onClick={close}>取消</button>
-          <button className="btn btn-primary" disabled={rangeType==='custom'&&filtered.length===0} onClick={go}>导出</button>
+          <button className="btn btn-primary" disabled={(rangeType==='custom'&&filtered.length===0) || (sel==='revise' && !canReviseExport)} onClick={go}>导出</button>
         </div>
       </div>
     </div>
@@ -1712,60 +2695,100 @@ function ExportModal({ onExport, allDates, close, personnel, dayHours }) {
 }
 
 /* ═══ Template View Modal ══════════════════════════════════════════════════ */
-function TemplateViewModal({ template, types, onClear, close }) {
+function TemplateViewModal({ template, onClear, close }) {
   if (!template) return null;
-  const WD = ['周一','周二','周三','周四','周五','周六','周日'];
-  // Collect all person names across all days
-  const allNames = [...new Set(
-    Object.values(template.data).flatMap(d=>Object.keys(d))
-  )].sort();
-  const totalEntries = Object.values(template.data).reduce((s,d)=>
-    s+Object.values(d).reduce((ss,tt)=>ss+Object.values(tt).reduce((n,v)=>n+v,0),0),0);
+  const preview = template.preview || {};
+  const rawGrid = preview.rawGrid || null;
+  const rawMerges = preview.rawMerges || [];
+  const totalEntries = Object.values(template.data || {}).reduce((s,d)=>
+    s+Object.values(d || {}).reduce((ss,tt)=>ss+Object.values(tt || {}).reduce((n,v)=>n+v,0),0),0);
+
+  function excelColName(idx) {
+    let n = idx + 1;
+    let s = '';
+    while (n > 0) {
+      const rem = (n - 1) % 26;
+      s = String.fromCharCode(65 + rem) + s;
+      n = Math.floor((n - 1) / 26);
+    }
+    return s;
+  }
+
+  function renderRawGrid() {
+    if (!rawGrid?.length) {
+      return (
+        <div style={{padding:'20px',textAlign:'center',fontSize:'12px',color:'var(--muted)'}}>
+          当前模板不含原始视图数据，请通过“排班转模板”重新生成后再查看。
+        </div>
+      );
+    }
+
+    const mergeStarts = {};
+    const mergeSkips = new Set();
+    const maxR = rawGrid.length - 1;
+    const maxC = Math.max(...rawGrid.map(row=>row?.length || 0), 0) - 1;
+
+    for (const m of rawMerges) {
+      const rowSpan = m.e.r - m.s.r + 1;
+      const colSpan = m.e.c - m.s.c + 1;
+      mergeStarts[`${m.s.r},${m.s.c}`] = { rowSpan, colSpan };
+      for (let rr=m.s.r; rr<=m.e.r; rr++) {
+        for (let cc=m.s.c; cc<=m.e.c; cc++) {
+          if (rr===m.s.r && cc===m.s.c) continue;
+          mergeSkips.add(`${rr},${cc}`);
+        }
+      }
+    }
+
+    return (
+      <div className="raw-grid-wrap raw-grid-wrap-lg" style={{maxHeight:'60vh'}}>
+        <table className="raw-grid">
+          <colgroup>
+            <col style={{width:48}} />
+            {Array.from({length:maxC+1}, (_, idx)=> <col key={idx} style={{width:120}} />)}
+          </colgroup>
+          <thead>
+            <tr>
+              <th className="row-hdr">#</th>
+              {Array.from({length:maxC+1},(_,i)=><th key={i}>{excelColName(i)}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({length:maxR+1}, (_, r)=>(
+              <tr key={r}>
+                <td className="row-hdr">{r+1}</td>
+                {Array.from({length:maxC+1}, (_, c)=>{
+                  const key = `${r},${c}`;
+                  if (mergeSkips.has(key)) return null;
+                  const span = mergeStarts[key];
+                  const val = rawGrid[r]?.[c]?.val || '';
+                  return (
+                    <td key={c} rowSpan={span?.rowSpan} colSpan={span?.colSpan} title={val}>
+                      {val}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
 
   return (
     <div className="overlay" onClick={e=>e.target===e.currentTarget&&close()}>
-      <div className="modal" style={{width:680,maxHeight:'85vh',overflow:'hidden',display:'flex',flexDirection:'column'}}>
+      <div className="modal" style={{width:'min(1240px, 96vw)',maxHeight:'90vh',overflow:'hidden',display:'flex',flexDirection:'column'}}>
         <div className="modal-title">
-          📋 模板预览 — <span style={{color:'var(--yellow)'}}>{template.name}</span>
+          📋 模板原始视图 — <span style={{color:'var(--yellow)'}}>{template.name}</span>
           <button className="close" onClick={close}>✕</button>
         </div>
         <div style={{fontSize:'12px',color:'var(--muted)',marginBottom:'10px'}}>
-          共 <strong style={{color:'var(--text)'}}>{allNames.length}</strong> 人 ·
-          <strong style={{color:'var(--accent)'}}> {totalEntries}</strong> 条记录 ·
-          覆盖 <strong style={{color:'var(--text)'}}>{Object.keys(template.data).length}</strong> 个星期
+          展示模板导入时的原始表格布局（含合并单元格） · 当前模板统计总条数
+          <strong style={{color:'var(--accent)'}}> {totalEntries}</strong>
         </div>
         <div style={{flex:1,overflowY:'auto'}}>
-          <div className="sched-table-wrap" style={{maxHeight:'none'}}>
-            <table className="sched-table">
-              <thead>
-                <tr>
-                  <th style={{minWidth:60,position:'sticky',left:0,zIndex:2}}>姓名</th>
-                  {[0,1,2,3,4,5,6].map(d=><th key={d}>{WD[d]}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {allNames.map(name=>(
-                  <tr key={name}>
-                    <td style={{fontWeight:600,position:'sticky',left:0,background:'var(--surface)',zIndex:1}}>{name}</td>
-                    {[0,1,2,3,4,5,6].map(wd=>{
-                      const dayData = template.data[wd]?.[name];
-                      return (
-                        <td key={wd} style={{fontSize:'11px'}}>
-                          {dayData
-                            ? Object.entries(dayData).map(([tn,cnt])=>{
-                                const t = types.find(t=>t.name===tn);
-                                return <div key={tn} style={{color:t?.color||'var(--text)'}}>{tn}×{cnt}</div>;
-                              })
-                            : <span style={{color:'var(--border)'}}>—</span>
-                          }
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {renderRawGrid()}
         </div>
         <div style={{display:'flex',gap:'8px',marginTop:'14px'}}>
           <button className="btn btn-danger" onClick={onClear}>清除模板</button>
@@ -2326,11 +3349,6 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
   const [modalRules, setModalRules]   = useState(()=>normalizeScheduleRules(initialRules));
   const [editData, setEditData]       = useState(null); // editable copy of result
   const [tplName, setTplName]         = useState('');
-  // New person row form
-  const [newPerson, setNewPerson]     = useState('');
-  const [newWd, setNewWd]             = useState(0);
-  const [newType, setNewType]         = useState('');
-  const [newCnt, setNewCnt]           = useState(1);
   const [typeKeyword, setTypeKeyword] = useState('');
   const [typeTarget, setTypeTarget]   = useState('');
   const [weekdayKeyword, setWeekdayKeyword] = useState('');
@@ -2430,46 +3448,6 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
     rerunParse(ws, cleared);
   }
 
-  // ── Edit helpers ──────────────────────────────────────────────────────
-  function setCount(wd, personName, typeName, cnt) {
-    setEditData(prev => {
-      const d = JSON.parse(JSON.stringify(prev));
-      if (cnt <= 0) {
-        if (d[wd]?.[personName]) {
-          delete d[wd][personName][typeName];
-          if (!Object.keys(d[wd][personName]).length) delete d[wd][personName];
-          if (!Object.keys(d[wd]||{}).length) delete d[wd];
-        }
-      } else {
-        d[wd] = d[wd]||{}; d[wd][personName] = d[wd][personName]||{};
-        d[wd][personName][typeName] = cnt;
-      }
-      return d;
-    });
-  }
-
-  function addEntry(wd, personName, typeName, cnt) {
-    if (!personName || !typeName || cnt<=0) return;
-    setCount(wd, personName, typeName, cnt);
-  }
-
-  function addNewRow() {
-    const pname = newPerson || (personnel[0]?.name);
-    const tname = newType || (types[0]?.name);
-    if (!pname || !tname || newCnt<=0) return;
-    addEntry(newWd, pname, tname, newCnt);
-  }
-
-  function deleteEntry(wd, personName, typeName) {
-    setCount(wd, personName, typeName, 0);
-  }
-
-  function addTypeToCell(wd, personName) {
-    const tname = types[0]?.name;
-    if (!tname) return;
-    setCount(wd, personName, tname, 1);
-  }
-
   // ── Computed ──────────────────────────────────────────────────────────
   const totalCount = editData
     ? Object.values(editData).reduce((s,d)=>s+Object.values(d).reduce((ss,tt)=>ss+Object.values(tt).reduce((n,v)=>n+v,0),0),0)
@@ -2499,6 +3477,7 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
   function doSave() {
     if (!editData) return;
     onSave({
+      id: `tpl_${Date.now()}_${Math.floor(Math.random()*100000)}`,
       name: tplName || '排班模板',
       data: editData,
       preview: parseResult ? {
@@ -2685,7 +3664,7 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
                 <span style={{color:'var(--yellow)'}}>⚠ {parseResult.unmatched.length} 个姓名仍未匹配，可返回继续补规则</span>
               )}
               <span style={{fontSize:'11px',color:'var(--muted)',marginLeft:'auto'}}>
-                💡 这里先把周模板校准干净；保存后建议切到按周修订模式套用，再回按天逐格核对统计差异
+                💡 这里先把周模板校准干净；保存后先指派当前周模板，必要时再写入模板数据，最后回按天核对差异
               </span>
             </div>
 
@@ -2719,6 +3698,65 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
             </div>
           </div>
         )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ Clear Records Modal ════════════════════════════════════════════════════ */
+function ClearRecordsModal({ allDates, onConfirm, close }) {
+  const [rangeType, setRangeType] = useState('all');
+  const [startDate, setStartDate] = useState(allDates[0] || '');
+  const [endDate, setEndDate] = useState(allDates[allDates.length - 1] || '');
+
+  useEffect(()=>{
+    setStartDate(allDates[0] || '');
+    setEndDate(allDates[allDates.length - 1] || '');
+  },[allDates]);
+
+  const targetDates = useMemo(()=>{
+    if (rangeType === 'all') return allDates;
+    if (!startDate || !endDate || startDate > endDate) return [];
+    return allDates.filter(d=>d>=startDate && d<=endDate);
+  },[allDates, rangeType, startDate, endDate]);
+
+  const invalidRange = rangeType === 'custom' && (!startDate || !endDate || startDate > endDate);
+
+  return (
+    <div className="overlay">
+      <div className="modal modal-sm">
+        <div className="modal-title">🧹 清空记录</div>
+        {!allDates.length ? (
+          <p style={{fontSize:'13px',color:'var(--muted)',marginBottom:'16px'}}>当前没有可清空的记录。</p>
+        ) : (
+          <>
+            <div className="radio-row" style={{marginBottom:'12px'}}>
+              <label><input type="radio" checked={rangeType==='all'} onChange={()=>setRangeType('all')}/> 全部时间</label>
+              <label><input type="radio" checked={rangeType==='custom'} onChange={()=>setRangeType('custom')}/> 指定时间范围</label>
+            </div>
+            {rangeType==='custom' && (
+              <div style={{display:'flex',gap:'8px',alignItems:'center',marginBottom:'10px',flexWrap:'wrap'}}>
+                <input className="inp" type="date" value={startDate} min={allDates[0]} max={allDates[allDates.length-1]} onChange={e=>setStartDate(e.target.value)} style={{flex:1,minWidth:'120px'}}/>
+                <span style={{fontSize:'12px',color:'var(--muted)'}}>至</span>
+                <input className="inp" type="date" value={endDate} min={allDates[0]} max={allDates[allDates.length-1]} onChange={e=>setEndDate(e.target.value)} style={{flex:1,minWidth:'120px'}}/>
+              </div>
+            )}
+            <p style={{fontSize:'12px',color:invalidRange?'var(--red)':'var(--muted)',marginBottom:'14px'}}>
+              {invalidRange ? '起止日期无效，请重新选择。' : `将清空 ${targetDates.length} 天记录（不可撤销）。`}
+            </p>
+          </>
+        )}
+        <div style={{display:'flex',justifyContent:'flex-end',gap:'8px'}}>
+          <button className="btn" onClick={close}>取消</button>
+          <button
+            className="btn btn-danger"
+            style={{background:'var(--red)',color:'#fff'}}
+            disabled={!allDates.length || invalidRange || !targetDates.length}
+            onClick={()=>onConfirm(rangeType, startDate, endDate)}
+          >
+            确认清空
+          </button>
         </div>
       </div>
     </div>
