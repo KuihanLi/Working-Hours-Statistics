@@ -1116,9 +1116,9 @@ function App() {
           </button>
         )}
         <button className="btn btn-sm btn-primary" onClick={()=>setModal('export')}>📊 导出</button>
-        <button className="theme-btn" onClick={()=>setTheme(t=>t==='dark'?'light':'dark')} title="切换主题">
-          {theme==='dark'?'☀️':'🌙'}
-        </button>
+                <button className="theme-btn" onClick={()=>setTheme(t=>t==='dark'?'light':'dark')} title="切换主题">
+                  <span className="theme-btn-icon">{theme==='dark'?'☀️':'🌙'}</span>
+                </button>
       </div>
 
       <div className="app-body">

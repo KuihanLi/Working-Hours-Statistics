@@ -343,7 +343,9 @@ td.col-total{color:var(--yellow)!important;font-weight:600;font-family:'SF Mono'
 .theme-btn{width:30px;height:30px;display:flex;align-items:center;justify-content:center;
   border-radius:var(--radius);border:1px solid var(--border);background:var(--surface2);
   cursor:pointer;font-size:15px;transition:all .18s ease;flex-shrink:0;box-shadow:0 10px 22px rgba(0,0,0,.08)}
-.theme-btn:hover{background:var(--border);transform:rotate(-8deg) translateY(-1px)}
+.theme-btn-icon{display:inline-block;transform-origin:center;transition:transform .18s ease}
+.theme-btn:hover{background:var(--border);transform:translateY(-1px)}
+.theme-btn:hover .theme-btn-icon{transform:rotate(-16deg)}
 /* ── Template badge ── */
 .tpl-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;
   border-radius:var(--radius);font-size:12px;background:var(--yellow)22;
