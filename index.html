@@ -27,6 +27,12 @@ function App() {
   }
 
   function normalizeEntry(entry, fallback = {}) {
+    const readHours = (value, fallbackValue = null) => {
+      const n = typeof value === 'number' ? value : parseFloat(value);
+      if (Number.isFinite(n) && n >= 0) return n;
+      const f = typeof fallbackValue === 'number' ? fallbackValue : parseFloat(fallbackValue);
+      return Number.isFinite(f) && f >= 0 ? f : null;
+    };
     if (entry && typeof entry === 'object') {
       return {
         id: entry.id || uid(),
@@ -38,6 +44,12 @@ function App() {
         rowLimit: entry.rowLimit || fallback.rowLimit || null,
         colLimit: entry.colLimit || fallback.colLimit || null,
         typeName: entry.typeName || fallback.typeName || null,
+        hours: readHours(entry.hours, fallback.hours),
+        role: entry.role || fallback.role || null,
+        semanticKind: entry.semanticKind || fallback.semanticKind || null,
+        hoursReason: entry.hoursReason || fallback.hoursReason || null,
+        creditGroupKey: entry.creditGroupKey || fallback.creditGroupKey || null,
+        contextLabel: entry.contextLabel || fallback.contextLabel || null,
       };
     }
     return {
@@ -50,6 +62,12 @@ function App() {
       rowLimit: fallback.rowLimit || null,
       colLimit: fallback.colLimit || null,
       typeName: fallback.typeName || null,
+      hours: readHours(null, fallback.hours),
+      role: fallback.role || null,
+      semanticKind: fallback.semanticKind || null,
+      hoursReason: fallback.hoursReason || null,
+      creditGroupKey: fallback.creditGroupKey || null,
+      contextLabel: fallback.contextLabel || null,
     };
   }
 
@@ -59,8 +77,9 @@ function App() {
     return Array.from({length:n}, ()=>normalizeEntry(null, fallback));
   }
 
-  function normalizeRecordsModel(input) {
+  function normalizeRecordsModel(input, typeDefs = []) {
     const out = {};
+    const typeById = Object.fromEntries((typeDefs || []).map(t=>[t.id,t]));
     if (!input || typeof input !== 'object') return out;
     Object.entries(input).forEach(([dateStr, dayObj])=>{
       if (!dayObj || typeof dayObj !== 'object') return;
@@ -71,7 +90,11 @@ function App() {
         Object.entries(personObj).forEach(([tid, cell])=>{
           const n = countCell(cell);
           if (!n && !Array.isArray(cell)) return;
-          out[dateStr][pid][tid] = normalizeCellEntries(cell);
+          const t = typeById[tid];
+          out[dateStr][pid][tid] = normalizeCellEntries(cell, {
+            typeName:t?.name || null,
+            hours:Number.isFinite(t?.hours) ? t.hours : null,
+          });
         });
         if (!Object.keys(out[dateStr][pid]).length) delete out[dateStr][pid];
       });
@@ -86,7 +109,7 @@ function App() {
   const LS_WEEK_DAY_LOCKS = 'wh_week_day_locks';
   const [personnel, setPersonnel] = useState(()=>loadLS('wh_personnel', DEF_PERSONNEL));
   const [types, setTypes]         = useState(()=>loadLS('wh_types', DEF_TYPES));
-  const [records, setRecords]     = useState(()=>normalizeRecordsModel(loadLS('wh_records', {})));
+  const [records, setRecords]     = useState(()=>normalizeRecordsModel(loadLS('wh_records', {}), types));
   const [view, setView]           = useState('day');
   const [weekMode, setWeekMode]   = useState('stats');
   const [curDate, setCurDate]     = useState(new Date());
@@ -156,17 +179,17 @@ function App() {
       for (const p of personnel) {
         const h = view==='day'
           ? records?.[fmt(curDate)]?.[p.id]
-            ? types.reduce((s,t)=>s+((records[fmt(curDate)][p.id][t.id]||0)*t.hours),0)
+            ? types.reduce((s,t)=>s+cellHoursFromCell(records[fmt(curDate)][p.id][t.id], t),0)
             : 0
           : weekDates(getMonday(curDate)).reduce((s,d)=>{
               const dr=records?.[fmt(d)]?.[p.id]||{};
-              return s+types.reduce((ss,t)=>ss+(dr[t.id]||0)*t.hours,0);
+              return s+types.reduce((ss,t)=>ss+cellHoursFromCell(dr[t.id], t),0);
             },0);
         if (h===0) n.add(p.id);
       }
       return n;
     });
-  },[autoHide, view, curDate, records]);
+  },[autoHide, view, curDate, records, personnel, types]);
   useEffect(()=>{
     localStorage.setItem('wh_theme', theme);
     document.body.classList.toggle('light', theme==='light');
@@ -245,6 +268,19 @@ function App() {
   function getCount(dateStr, pid, tid) {
     return countCell(records?.[dateStr]?.[pid]?.[tid]);
   }
+  function getEntryHours(entry, typeObj = null) {
+    const n = typeof entry?.hours === 'number' ? entry.hours : parseFloat(entry?.hours);
+    if (Number.isFinite(n) && n >= 0) return n;
+    return Number.isFinite(typeObj?.hours) ? typeObj.hours : 0;
+  }
+  function cellHoursFromCell(cell, typeObj = null) {
+    if (Array.isArray(cell)) return cell.reduce((s,entry)=>s+getEntryHours(entry, typeObj), 0);
+    return countCell(cell) * (Number.isFinite(typeObj?.hours) ? typeObj.hours : 0);
+  }
+  function getCellHours(dateStr, pid, tid) {
+    const t = types.find(x=>x.id===tid) || null;
+    return cellHoursFromCell(records?.[dateStr]?.[pid]?.[tid], t);
+  }
   function getEntries(dateStr, pid, tid, fallback = {}) {
     const cell = records?.[dateStr]?.[pid]?.[tid];
     return normalizeCellEntries(cell, fallback).sort((a,b)=>{
@@ -292,6 +328,12 @@ function App() {
           rowLimit: slot.rowLimit || slot.typeName,
           colLimit: slot.colLimit || WD[relDay] || '',
           typeName: slot.typeName,
+          hours: slot.hours,
+          role: slot.role,
+          semanticKind: slot.semanticKind,
+          hoursReason: slot.hoursReason,
+          creditGroupKey: slot.creditGroupKey,
+          contextLabel: slot.contextLabel,
         }));
       });
     Object.entries(currentTemplate?.data || {}).forEach(([wd, dayMap])=>{
@@ -304,12 +346,14 @@ function App() {
           const key = `${relDay}|${personName}|${typeName}`;
           out[key] = out[key] || [];
           while (out[key].length < cnt) {
+            const t = types.find(x=>x.name===typeName);
             out[key].push(normalizeEntry({
               id: `tpl_virtual_${relDay}_${personName}_${typeName}_${out[key].length}`,
               source: 'template',
               rowLimit: typeName,
               colLimit: WD[relDay] || '',
               typeName,
+              hours: Number.isFinite(t?.hours) ? t.hours : null,
             }));
           }
         });
@@ -326,13 +370,13 @@ function App() {
     });
     Object.values(out).forEach(sortEntries);
     return out;
-  },[currentTemplate]);
+  },[currentTemplate, types]);
   function getTplEntries(relDay, personName, typeName) {
     return tplEntryIndex[`${relDay}|${personName}|${typeName}`] || [];
   }
   function dayHours(dateStr, pid) {
     const dr = records?.[dateStr]?.[pid] || {};
-    return types.reduce((s,t)=>s+countCell(dr[t.id])*t.hours, 0);
+    return types.reduce((s,t)=>s+cellHoursFromCell(dr[t.id], t), 0);
   }
   function weekHours(pid) {
     return wDates.reduce((s,d)=>s+dayHours(fmt(d),pid), 0);
@@ -355,12 +399,15 @@ function App() {
   }
 
   function makeEntryByTypeId(tid, base = {}) {
-    const typeName = types.find(t=>t.id===tid)?.name || base.typeName || null;
+    const typeObj = types.find(t=>t.id===tid) || null;
+    const typeName = typeObj?.name || base.typeName || null;
+    const hours = Number.isFinite(base.hours) ? base.hours : (Number.isFinite(typeObj?.hours) ? typeObj.hours : null);
     return normalizeEntry({
       ...base,
       typeName,
+      hours,
       createdAt: Date.now(),
-    }, { typeName, source: base.source || 'day' });
+    }, { typeName, hours, source: base.source || 'day' });
   }
 
   function update(dateStr, pid, tid, delta, source = 'day') {
@@ -498,7 +545,7 @@ function App() {
       sum + Object.values(day).reduce((ss, person) =>
         ss + Object.values(person).reduce((n,v)=>n+countCell(v),0), 0), 0),
     aliasRuleCount: Object.keys(scheduleRules.personAliases).length,
-    parserRuleCount: scheduleRules.typeRules.length + scheduleRules.weekdayRules.length + scheduleRules.ignoreRules.length,
+    parserRuleCount: scheduleRules.typeRules.length + scheduleRules.weekdayRules.length + scheduleRules.ignoreRules.length + scheduleRules.hourRules.length,
   };
 
   function buildWeekRecordPools(weekDatesArr) {
@@ -712,7 +759,7 @@ function App() {
           const dayCounts = types.map(t=>countCell(dr[t.id]));
           const row = [p.name, d,
             ...dayCounts,
-            ...types.map((t, idx)=>dayCounts[idx]*t.hours),
+            ...types.map(t=>cellHoursFromCell(dr[t.id], t)),
             dayHours(d,p.id)];
           rows.push(row);
         }
@@ -829,6 +876,7 @@ function App() {
         // Find type columns (after 姓名, 日期)
         const typeNames = types.map(t=>t.name);
         const typeColIdxs = typeNames.map(n => hdr.findIndex(h=>String(h).startsWith(n)&&String(h).endsWith('次)')));
+        const typeHourColIdxs = typeNames.map(n => hdr.findIndex(h=>String(h).startsWith(n)&&String(h).endsWith('(h)')));
         const newRec = JSON.parse(JSON.stringify(records));
         let count = 0;
         for (let i=1;i<rows.length;i++) {
@@ -845,10 +893,19 @@ function App() {
             if (cnt>0) {
               newRec[date]=newRec[date]||{};
               newRec[date][person.id]=newRec[date][person.id]||{};
+              const hIdx = typeHourColIdxs[j];
+              const exportedHours = hIdx >= 0 ? parseFloat(row[hIdx]) : NaN;
+              const perEntryHours = Number.isFinite(exportedHours) && exportedHours >= 0 ? exportedHours / cnt : t.hours;
               const arr = [];
-              for (let k=0; k<cnt; k++) arr.push(makeEntryByTypeId(t.id, { source:'import', rowLimit:t.name, colLimit:WD[new Date(date).getDay()===0?6:new Date(date).getDay()-1] }));
+              for (let k=0; k<cnt; k++) arr.push(makeEntryByTypeId(t.id, {
+                source:'import',
+                rowLimit:t.name,
+                colLimit:WD[new Date(date).getDay()===0?6:new Date(date).getDay()-1],
+                hours:perEntryHours,
+                hoursReason:Number.isFinite(exportedHours) ? '从工时明细导入' : '按工时类型默认值',
+              }));
               newRec[date][person.id][t.id]=arr;
-              count++;
+              count += cnt;
             }
           });
         }
@@ -902,6 +959,12 @@ function App() {
             rowLimit: slot.rowLimit || slot.typeName,
             colLimit: slot.colLimit || WD[relDay] || '',
             typeName: slot.typeName,
+            hours: slot.hours,
+            role: slot.role,
+            semanticKind: slot.semanticKind,
+            hoursReason: slot.hoursReason,
+            creditGroupKey: slot.creditGroupKey,
+            contextLabel: slot.contextLabel,
           }));
           });
         const applyDay = (dateStr, relDay) => {
@@ -924,6 +987,8 @@ function App() {
                   rowLimit:t.name,
                   colLimit:WD[relDay] || '',
                   typeName:t.name,
+                  hours:t.hours,
+                  hoursReason:'按工时类型默认值',
                 }));
               }
               nextPerson[t.id] = entries;
@@ -1257,6 +1322,7 @@ function App() {
               {isCurrentWeekDayLocked && <span className="flow-badge todo">本周周修订锁定</span>}
             </>)}
             <span style={{marginLeft:'auto',display:'flex',gap:'6px',flexWrap:'wrap',alignItems:'center'}}>
+              <button className="btn btn-sm" onClick={()=>setModal('batch-hours')} title="批量选择当前日/当前周记录并一键修改实际工时">⚡ 批量工时</button>
               {types.map(t=>(
                 <span key={t.id} className="badge" style={{color:t.color,borderColor:t.color,background:t.color+'22'}}>
                   {t.name} {t.hours}h
@@ -1292,7 +1358,8 @@ function App() {
                 getCount={getCount} update={update} dayHours={dayHours}
                 showDiff={showDiff} curDate={curDate}
                 getTplEntries={getTplEntries}
-                getEntries={getEntries} removeEntry={removeEntryById} moveEntry={moveEntryToPerson}
+                getEntries={getEntries} getEntryHours={getEntryHours} getCellHours={getCellHours}
+                removeEntry={removeEntryById} moveEntry={moveEntryToPerson}
                 allPersonnel={personnel}/>
             : <WeekView personnel={diffPersonnel} types={types} wDates={wDates}
                 dayHours={dayHours} setCurDate={setCurDate} setView={setView}
@@ -1336,6 +1403,7 @@ function App() {
       {modal==='confirm-all'&& <ConfirmModal msg="将清空全部数据：所有工时记录、人员名单（工时类型恢复默认）。此操作不可撤销！" onOk={confirmCb} close={()=>setModal(null)} okLabel="全部清空"/>}
       {modal==='schedule'   && <ScheduleImportModal personnel={personnel} types={types} initialRules={scheduleRules} onSaveRules={setScheduleRules} onSave={tpl=>{ const saved = saveTemplateToLibrary(tpl); setModal(null); showToast(`模板「${saved?.name || ''}」已保存到模板库。`, 'success'); }} close={()=>setModal(null)}/>}
       {modal==='view-tpl'   && <TemplateViewModal template={currentTemplate} onClear={()=>{unassignTemplateFromWeek();setModal(null);}} close={()=>setModal(null)}/>}
+      {modal==='batch-hours' && <BatchHoursModal records={records} setRecords={setRecords} personnel={personnel} types={types} parserRules={scheduleRules} curDate={curDate} initialScope={view==='week'?'week':'day'} showToast={showToast} close={()=>setModal(null)}/>}
     </div>
   );
 }
@@ -1449,7 +1517,7 @@ function WorkflowPanel({ personnelCount, typeCount, hasTemplate, selectedTemplat
 }
 
 /* ═══ Day View ══════════════════════════════════════════════════════════════ */
-function DayView({ personnel, types, dateStr, getCount, update, dayHours, showDiff, getTplEntries, curDate, getEntries, removeEntry, moveEntry, allPersonnel }) {
+function DayView({ personnel, types, dateStr, getCount, update, dayHours, showDiff, getTplEntries, curDate, getEntries, getEntryHours, getCellHours, removeEntry, moveEntry, allPersonnel }) {
   if (!personnel.length) return (
     <div className="empty"><div className="icon">👥</div><p>暂无人员，点击左下角「+ 人员」或「导入人员」</p></div>
   );
@@ -1565,7 +1633,7 @@ function DayView({ personnel, types, dateStr, getCount, update, dayHours, showDi
               <th key={t.id} className="th-type" style={{borderTopColor:t.color,minWidth:'190px'}}>
                 <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'2px'}}>
                   <span style={{color:t.color}}>{t.name}</span>
-                  <span style={{fontSize:'11px',color:'var(--muted)',fontWeight:400}}>{t.hours} h / 次</span>
+                  <span style={{fontSize:'11px',color:'var(--muted)',fontWeight:400}}>{t.hours} h / 次（默认）</span>
                 </div>
               </th>
             ))}
@@ -1601,6 +1669,7 @@ function DayView({ personnel, types, dateStr, getCount, update, dayHours, showDi
                               return (
                               <div key={entry.id || `${idx}_${t.id}`} className={`day-entry-card ${status}`} style={{position:'relative'}}>
                                 <span className="day-entry-title">{getEntryTitle(entry, t.name)}</span>
+                                <span className="day-entry-meta" title={entry.hoursReason || '实际工时'}>{getEntryHours(entry,t).toFixed(2)}h</span>
                                 <button className="day-entry-del" title="删除该条记录" onClick={()=>removeEntry(dateStr, p.id, t.id, entry.id, 'day')}>✕</button>
                                 <button
                                   className="day-entry-del"
@@ -1679,7 +1748,7 @@ function DayView({ personnel, types, dateStr, getCount, update, dayHours, showDi
                           </button>
                           <div>
                             {entries.length===0 && <div className="cval" style={{color:cnt>0?t.color:'var(--muted)'}}>{cnt}</div>}
-                            {cnt>0&&<div className="chours">{(cnt*t.hours).toFixed(1)}h</div>}
+                            {cnt>0&&<div className="chours">{getCellHours(dateStr,p.id,t.id).toFixed(1)}h</div>}
                           </div>
                           <button className="cbtn plus" onClick={()=>update(dateStr,p.id,t.id,1,'day')}>+</button>
                         </div>
@@ -1698,7 +1767,7 @@ function DayView({ personnel, types, dateStr, getCount, update, dayHours, showDi
             <td className="col-name">合计</td>
             {types.map(t=>{
               const cnt = personnel.reduce((s,p)=>s+getCount(dateStr,p.id,t.id),0);
-              const hrs = cnt * t.hours;
+              const hrs = personnel.reduce((s,p)=>s+getCellHours(dateStr,p.id,t.id),0);
               return (
                 <td key={t.id} style={{fontFamily:"'SF Mono','Consolas',monospace",fontSize:'12px'}}>
                   {cnt>0 ? <><span style={{color:t.color}}>{cnt}条</span><span style={{color:'var(--muted)'}}> / {hrs.toFixed(1)}h</span></> : <span style={{color:'var(--muted)'}}>—</span>}
@@ -1734,6 +1803,17 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
   // template hours for a person on a weekday (sum across all types)
   function tplDayHours(personName, relDay) {
     if (!template || !getTplCount) return 0;
+    const slotMap = template?.preview?.cellSlotMap || {};
+    const matchedSlots = Object.values(slotMap).filter(slot=>
+      Number(slot?.weekday) === Number(relDay) && slot?.personName === personName
+    );
+    if (matchedSlots.length) {
+      return matchedSlots.reduce((s,slot)=>{
+        const t = types.find(x=>x.name===slot.typeName);
+        const h = typeof slot.hours === 'number' ? slot.hours : parseFloat(slot.hours);
+        return s + (Number.isFinite(h) ? h : (Number.isFinite(t?.hours) ? t.hours : 0));
+      }, 0);
+    }
     const dayData = template.data?.[relDay]?.[personName];
     if (!dayData) return 0;
     return Object.entries(dayData).reduce((s,[tn,cnt])=>{
@@ -1818,6 +1898,9 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
               absSlotKey: entry?.absSlotKey || null,
               absRow: Number.isFinite(entry?.absRow) ? entry.absRow : null,
               absCol: Number.isFinite(entry?.absCol) ? entry.absCol : null,
+              hours: Number.isFinite(entry?.hours) ? entry.hours : null,
+              role: entry?.role || null,
+              semanticKind: entry?.semanticKind || null,
             };
             if (exactKey) pushPool(poolsExact, exactKey, item);
             if (coordKey) pushPool(poolsCoord, coordKey, item);
@@ -1936,6 +2019,12 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
       rowLimit: slot?.rowLimit || typeName,
       colLimit: slot?.colLimit || WD[slot?.weekday] || '',
       typeName,
+      hours:Number.isFinite(slot?.hours) ? slot.hours : type.hours,
+      role:slot?.role || null,
+      semanticKind:slot?.semanticKind || null,
+      hoursReason:slot?.hoursReason || null,
+      creditGroupKey:slot?.creditGroupKey || null,
+      contextLabel:slot?.contextLabel || null,
     });
     r[dateStr] = r[dateStr] || {};
     r[dateStr][person.id] = r[dateStr][person.id] || {};
@@ -2219,7 +2308,7 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
                           colSpan={span?.colSpan}
                           className={viewInfo.className + (isActiveDay ? ' active-day' : '')}
                           style={viewInfo.style}
-                          title={viewInfo.hint || (viewInfo.slot ? `${WD[viewInfo.slot.weekday]} · ${viewInfo.slot.typeName} · 模板人员：${viewInfo.slot.baselinePerson || '空槽位'}` : val)}
+                          title={viewInfo.hint || (viewInfo.slot ? `${WD[viewInfo.slot.weekday]} · ${viewInfo.slot.typeName} · ${Number.isFinite(viewInfo.slot.hours)?viewInfo.slot.hours.toFixed(2)+'h · ':''}${viewInfo.slot.hoursReason || ''} · 模板人员：${viewInfo.slot.baselinePerson || '空槽位'}` : val)}
                           onClick={viewInfo.clickable ? ()=>handleRevisionSlotClick(viewInfo.slot) : undefined}
                         >
                           <div className="week-slot-cell-inner">
@@ -2227,8 +2316,8 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
                             {viewInfo.isSelected && (
                               <div className="week-slot-editor" onMouseDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
                                 <div className="week-slot-editor-head">
-                                  <strong>{WD[viewInfo.slot.weekday]} · {viewInfo.slot.typeName}</strong>
-                                  <span>模板：{viewInfo.slot.baselinePerson || '空槽位'}</span>
+                                  <strong>{WD[viewInfo.slot.weekday]} · {viewInfo.slot.typeName} · {Number.isFinite(viewInfo.slot.hours)?viewInfo.slot.hours.toFixed(2)+'h':''}</strong>
+                                  <span>{viewInfo.slot.hoursReason || '模板工时'} · 模板：{viewInfo.slot.baselinePerson || '空槽位'}</span>
                                 </div>
                                 <input
                                   ref={reviseInlineInputRef}
@@ -2360,6 +2449,255 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
       </table>
       <div style={{padding:'8px 12px',fontSize:'11px',color:'var(--muted)',borderTop:'1px solid var(--border)'}}>
         💡 点击日期列头或单元格可跳转到当日详细录入视图
+      </div>
+    </div>
+  );
+}
+
+/* ═══ Batch Hours Modal ══════════════════════════════════════════════════════ */
+function BatchHoursModal({ records, setRecords, personnel, types, parserRules, curDate, initialScope='week', showToast, close }) {
+  const [scope, setScope] = useState(initialScope);
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [kindFilter, setKindFilter] = useState('all');
+  const [query, setQuery] = useState('');
+  const [customHours, setCustomHours] = useState('1');
+  const [selected, setSelected] = useState(()=>new Set());
+  const personById = useMemo(()=>Object.fromEntries(personnel.map(p=>[p.id,p])), [personnel]);
+  const typeById = useMemo(()=>Object.fromEntries(types.map(t=>[t.id,t])), [types]);
+  const kindLabels = {
+    leader:'负责人',
+    night_patrol:'晚巡',
+    duty:'值日',
+    wash:'洗抹布/洗板擦布',
+    time_range:'按时段值班',
+    default:'其他',
+    fixed:'固定规则',
+  };
+
+  const scopeDates = useMemo(()=>{
+    if (scope === 'day') return [fmt(curDate)];
+    return weekDates(getMonday(curDate)).map(fmt);
+  },[scope, curDate]);
+
+  function inferKind(entry) {
+    if (entry?.role === 'leader') return 'leader';
+    if (entry?.semanticKind) return entry.semanticKind;
+    const s = normStr(`${entry?.rowLimit || ''} ${entry?.contextLabel || ''} ${entry?.hoursReason || ''}`);
+    if (s.includes('负责人')) return 'leader';
+    if (s.includes('晚巡') || /21:00\s*[-~]\s*22:00/.test(s)) return 'night_patrol';
+    if (s.includes('值日')) return 'duty';
+    if (s.includes('洗')) return 'wash';
+    if (parseTimeMins(s) != null) return 'time_range';
+    return 'default';
+  }
+
+  const allRows = useMemo(()=>{
+    const rows = [];
+    const scopeSet = new Set(scopeDates);
+    Object.entries(records || {}).forEach(([dateStr, dayRec])=>{
+      if (!scopeSet.has(dateStr)) return;
+      Object.entries(dayRec || {}).forEach(([pid, personRec])=>{
+        const person = personById[pid];
+        if (!person) return;
+        Object.entries(personRec || {}).forEach(([tid, cell])=>{
+          const type = typeById[tid];
+          if (!type || !Array.isArray(cell)) return;
+          cell.forEach((entry, idx)=>{
+            const current = typeof entry?.hours === 'number' ? entry.hours : parseFloat(entry?.hours);
+            rows.push({
+              key:`${dateStr}|${pid}|${tid}|${entry?.id || idx}`,
+              dateStr,
+              pid,
+              tid,
+              entryId:entry?.id || null,
+              personName:person.name,
+              typeName:type.name,
+              defaultHours:type.hours,
+              currentHours:Number.isFinite(current) ? current : type.hours,
+              rowLimit:entry?.rowLimit || entry?.typeName || type.name,
+              hoursReason:entry?.hoursReason || '',
+              role:entry?.role || null,
+              contextLabel:entry?.contextLabel || '',
+              kind:inferKind(entry),
+            });
+          });
+        });
+      });
+    });
+    return rows.sort((a,b)=>a.dateStr.localeCompare(b.dateStr) || a.personName.localeCompare(b.personName,'zh') || a.typeName.localeCompare(b.typeName,'zh'));
+  },[records, scopeDates, personById, typeById]);
+
+  const visibleRows = useMemo(()=>{
+    const q = query.trim().toLowerCase();
+    return allRows.filter(row=>{
+      if (typeFilter !== 'all' && row.tid !== typeFilter) return false;
+      if (kindFilter !== 'all' && row.kind !== kindFilter) return false;
+      if (q) {
+        const hay = `${row.personName} ${row.typeName} ${row.rowLimit} ${row.hoursReason} ${kindLabels[row.kind] || row.kind}`.toLowerCase();
+        if (!hay.includes(q) && !matchSearch(row.personName, q)) return false;
+      }
+      return true;
+    });
+  },[allRows, typeFilter, kindFilter, query]);
+
+  useEffect(()=>{
+    const valid = new Set(allRows.map(r=>r.key));
+    setSelected(prev=>new Set([...prev].filter(k=>valid.has(k))));
+  },[allRows]);
+
+  function toggleOne(key) {
+    setSelected(prev=>{
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  function toggleVisible() {
+    setSelected(prev=>{
+      const next = new Set(prev);
+      const allSelected = visibleRows.length > 0 && visibleRows.every(r=>next.has(r.key));
+      visibleRows.forEach(r=>allSelected ? next.delete(r.key) : next.add(r.key));
+      return next;
+    });
+  }
+
+  function applyResolver(resolver, label, rowsOverride=null) {
+    if (!selected.size && !rowsOverride?.length) return;
+    const selectedRows = rowsOverride || allRows.filter(r=>selected.has(r.key));
+    if (!selectedRows.length) return;
+    const nextHours = Object.fromEntries(selectedRows.map(row=>[row.key, resolver(row)]));
+    setRecords(prev=>{
+      const next = JSON.parse(JSON.stringify(prev));
+      selectedRows.forEach(row=>{
+        const arr = next?.[row.dateStr]?.[row.pid]?.[row.tid];
+        if (!Array.isArray(arr)) return;
+        const idx = row.entryId ? arr.findIndex(e=>e?.id===row.entryId) : -1;
+        if (idx < 0) return;
+        const h = parseFloat(nextHours[row.key]);
+        if (!Number.isFinite(h) || h < 0) return;
+        arr[idx] = {
+          ...arr[idx],
+          hours:h,
+          hoursReason:label,
+          updatedAt:Date.now(),
+        };
+      });
+      return next;
+    });
+    showToast?.(`${label}：已更新 ${selectedRows.length} 条记录（仅${scope==='week'?'当前周':'当天'}）。`, 'success');
+  }
+
+  function applyTheory() {
+    const leaderCounts = {};
+    allRows.forEach(row=>{
+      if (row.kind !== 'leader') return;
+      leaderCounts[row.dateStr] = (leaderCounts[row.dateStr] || 0) + 1;
+    });
+    // 负责人是“两个区域合计”的共享额度。只要勾选了某天任一负责人，
+    // 就一并重算该日全部负责人槽位，避免只改半边后总工时失真。
+    const baseRows = allRows.filter(r=>selected.has(r.key));
+    const leaderDates = new Set(baseRows.filter(r=>r.kind==='leader').map(r=>r.dateStr));
+    const theoryRowsMap = new Map(baseRows.map(r=>[r.key,r]));
+    if (leaderDates.size) {
+      allRows.forEach(row=>{
+        if (row.kind==='leader' && leaderDates.has(row.dateStr)) theoryRowsMap.set(row.key,row);
+      });
+    }
+    const theoryRows = [...theoryRowsMap.values()];
+    applyResolver(row=>{
+      const d = new Date(`${row.dateStr}T12:00:00`);
+      const weekday = d.getDay() === 0 ? 6 : d.getDay()-1;
+      const inferred = inferScheduleHours(row.rowLimit, weekday, parserRules, {
+        role:row.kind==='leader' ? 'leader' : (row.role || 'task'),
+        contextLabel:row.contextLabel,
+        sectionKind:row.kind==='night_patrol' ? 'patrol' : '',
+        defaultHours:row.defaultHours,
+      });
+      if (row.kind === 'leader') {
+        return inferred.hours / Math.max(1, leaderCounts[row.dateStr] || 1);
+      }
+      return Number.isFinite(inferred.hours) ? inferred.hours : row.currentHours;
+    }, '按理论规则重算', theoryRows);
+  }
+
+  function applyCustom() {
+    const h = parseFloat(customHours);
+    if (!Number.isFinite(h) || h < 0) return;
+    applyResolver(()=>h, `批量设为 ${h}h`);
+  }
+
+  const allVisibleSelected = visibleRows.length > 0 && visibleRows.every(r=>selected.has(r.key));
+
+  return (
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&close()}>
+      <div className="modal" style={{width:'min(1080px,96vw)',maxHeight:'92vh',display:'flex',flexDirection:'column',overflow:'hidden'}}>
+        <div className="modal-title">⚡ 批量工时 <button className="close" onClick={close}>✕</button></div>
+        <div style={{fontSize:'12px',lineHeight:1.7,color:'var(--muted)',background:'var(--surface2)',padding:'9px 11px',borderRadius:8,marginBottom:10}}>
+          每条排班记录保存自己的实际工时，因此同一类型可以在不同日期、不同周使用不同工时。批量操作只修改当前选择范围，不改变其他周。
+        </div>
+
+        <div style={{display:'grid',gridTemplateColumns:'150px 180px 190px minmax(220px,1fr)',gap:8,marginBottom:8}}>
+          <select className="inp" value={scope} onChange={e=>{setScope(e.target.value);setSelected(new Set());}}>
+            <option value="day">仅当天 {fmt(curDate)}</option>
+            <option value="week">当前周 {fmt(getMonday(curDate))}</option>
+          </select>
+          <select className="inp" value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}>
+            <option value="all">全部工时类型</option>
+            {types.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          <select className="inp" value={kindFilter} onChange={e=>setKindFilter(e.target.value)}>
+            <option value="all">全部任务角色</option>
+            {Object.entries(kindLabels).map(([k,v])=><option key={k} value={k}>{v}</option>)}
+          </select>
+          <input className="inp" value={query} onChange={e=>setQuery(e.target.value)} placeholder="筛姓名 / 晚巡 / 负责人 / 时段…" />
+        </div>
+
+        <div style={{display:'flex',alignItems:'center',gap:7,flexWrap:'wrap',padding:'8px 0',borderBottom:'1px solid var(--border)'}}>
+          <button className="btn btn-sm" onClick={toggleVisible}>{allVisibleSelected?'取消筛选结果':'全选筛选结果'} ({visibleRows.length})</button>
+          <button className="btn btn-sm" onClick={()=>setSelected(new Set())}>清空选择</button>
+          <span className="flow-badge active">已选 {selected.size} 条</span>
+          <span style={{width:1,height:22,background:'var(--border)',margin:'0 2px'}} />
+          <button className="btn btn-sm btn-primary" disabled={!selected.size} onClick={applyTheory}>一键应用理论规则</button>
+          <button className="btn btn-sm" disabled={!selected.size} onClick={()=>applyResolver(()=>1,'批量设为 1h')}>设为 1h</button>
+          <button className="btn btn-sm" disabled={!selected.size} onClick={()=>applyResolver(()=>2,'批量设为 2h')}>设为 2h</button>
+          <button className="btn btn-sm" disabled={!selected.size} onClick={()=>applyResolver(row=>row.currentHours*2,'批量 ×2')}>×2</button>
+          <button className="btn btn-sm" disabled={!selected.size} onClick={()=>applyResolver(row=>row.defaultHours,'恢复类型默认工时')}>恢复类型默认</button>
+          <div style={{display:'flex',alignItems:'center',gap:5,marginLeft:'auto'}}>
+            <input className="inp inp-sm" type="number" min="0" step="0.25" value={customHours} onChange={e=>setCustomHours(e.target.value)} style={{width:78}} />
+            <span style={{fontSize:'12px',color:'var(--muted)'}}>h</span>
+            <button className="btn btn-sm" disabled={!selected.size} onClick={applyCustom}>应用自定义</button>
+          </div>
+        </div>
+
+        <div style={{flex:1,overflow:'auto',minHeight:260,marginTop:8,border:'1px solid var(--border)',borderRadius:8}}>
+          <table className="grid-table" style={{minWidth:860}}>
+            <thead>
+              <tr>
+                <th style={{width:44}}></th><th>日期</th><th>人员</th><th>类型</th><th>任务/时段</th><th>角色</th><th>实际工时</th><th>依据</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.map(row=>(
+                <tr key={row.key} style={{opacity:selected.has(row.key)?1:.88}}>
+                  <td><input type="checkbox" checked={selected.has(row.key)} onChange={()=>toggleOne(row.key)} /></td>
+                  <td style={{whiteSpace:'nowrap'}}>{row.dateStr}</td>
+                  <td>{row.personName}</td>
+                  <td>{row.typeName}</td>
+                  <td style={{maxWidth:220}}>{row.rowLimit}</td>
+                  <td>{kindLabels[row.kind] || row.kind}</td>
+                  <td style={{fontFamily:"'SF Mono','Consolas',monospace",fontWeight:700}}>{row.currentHours.toFixed(2)}h</td>
+                  <td style={{fontSize:'11px',color:'var(--muted)',maxWidth:260}}>{row.hoursReason || '类型默认值'}</td>
+                </tr>
+              ))}
+              {!visibleRows.length && <tr><td colSpan="8"><div className="empty" style={{padding:24}}><p>当前筛选条件下没有工时记录</p></div></td></tr>}
+            </tbody>
+          </table>
+        </div>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:10,fontSize:'11px',color:'var(--muted)'}}>
+          <span>理论规则：洗抹布/值日 1h；值班按时段；晚巡 1h；周日晚巡及负责人双倍；负责人跨区域合并计时。</span>
+          <button className="btn btn-primary" onClick={close}>完成</button>
+        </div>
       </div>
     </div>
   );
@@ -3354,6 +3692,9 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
   const [weekdayKeyword, setWeekdayKeyword] = useState('');
   const [weekdayTarget, setWeekdayTarget]   = useState(0);
   const [ignoreKeyword, setIgnoreKeyword] = useState('');
+  const [hourKeyword, setHourKeyword] = useState('');
+  const [hourValue, setHourValue] = useState('1');
+  const [hourSundayMultiplier, setHourSundayMultiplier] = useState('1');
   const fileRef = useRef();
   const WD_LABELS = ['周一','周二','周三','周四','周五','周六','周日'];
 
@@ -3430,6 +3771,26 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
     setIgnoreKeyword('');
   }
 
+  function addHourRule() {
+    const keyword = normStr(hourKeyword);
+    const hours = parseFloat(hourValue);
+    const sundayMultiplier = parseFloat(hourSundayMultiplier);
+    if (!keyword || !Number.isFinite(hours) || hours < 0 || !Number.isFinite(sundayMultiplier) || sundayMultiplier <= 0) return;
+    const kind = keyword.includes('负责人') ? 'leader'
+      : keyword.includes('晚巡') ? 'night_patrol'
+      : keyword.includes('值日') ? 'duty'
+      : keyword.includes('洗') ? 'wash'
+      : 'fixed';
+    const rest = modalRules.hourRules.filter(rule=>rule.keyword!==keyword);
+    updateRules({
+      ...modalRules,
+      hourRules:[...rest, {id:uid(), keyword, hours, sundayMultiplier, kind}],
+    });
+    setHourKeyword('');
+    setHourValue('1');
+    setHourSundayMultiplier('1');
+  }
+
   function removeRule(group, id) {
     updateRules({
       ...modalRules,
@@ -3442,10 +3803,10 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
   }
 
   function resetRuleLibrary() {
-    const cleared = makeEmptyScheduleRules();
-    setModalRules(cleared);
-    onSaveRules(cleared);
-    rerunParse(ws, cleared);
+    const defaults = makeEmptyScheduleRules();
+    setModalRules(defaults);
+    onSaveRules(defaults);
+    rerunParse(ws, defaults);
   }
 
   // ── Computed ──────────────────────────────────────────────────────────
@@ -3457,11 +3818,12 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
   const editPersons = editData
     ? [...new Set(Object.values(editData).flatMap(d=>Object.keys(d)))].sort()
     : [];
-  const totalRuleCount = Object.keys(modalRules.personAliases).length + modalRules.typeRules.length + modalRules.weekdayRules.length + modalRules.ignoreRules.length;
+  const totalRuleCount = Object.keys(modalRules.personAliases).length + modalRules.typeRules.length + modalRules.weekdayRules.length + modalRules.ignoreRules.length + modalRules.hourRules.length;
   const personAliasPreview = Object.entries(modalRules.personAliases).slice(0,3).map(([from,to])=>`${from} → ${to}`).join('，');
   const typeRulePreview = modalRules.typeRules.slice(0,3).map(rule=>`${rule.keyword} → ${rule.typeName}`).join('，');
   const weekdayRulePreview = modalRules.weekdayRules.slice(0,3).map(rule=>`${rule.keyword} → ${WD_LABELS[rule.weekday]}`).join('，');
   const ignoreRulePreview = modalRules.ignoreRules.slice(0,4).map(rule=>rule.keyword).join('、');
+  const hourRulePreview = modalRules.hourRules.slice(0,4).map(rule=>`${rule.keyword} ${rule.hours}h${rule.sundayMultiplier!==1?` · 周日×${rule.sundayMultiplier}`:''}`).join('，');
   const typeKeywordPlaceholder = modalRules.typeRules.length
     ? `例如：${modalRules.typeRules[0].keyword} → ${modalRules.typeRules[0].typeName}`
     : types.length
@@ -3516,11 +3878,12 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
               <strong style={{color:'var(--text)'}}>支持格式：</strong>
               时间段（<code>7:05-9:35</code>）、类型+时段（<code>晚巡21:00-22:00</code>）、
               日期+时段（<code>周六7:30-9:30</code>）、日期（<code>周一</code>）、
-              类型（<code>晚上值日</code>、<code>负责人</code>）均自动匹配工时类型
+              类型（<code>晚上值日</code>、<code>负责人</code>）均自动匹配；负责人标签缺失时也会按巡视表结构识别。
+              值班默认按实际时间范围计时，晚巡/负责人支持周日倍率。
             </div>
             <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginBottom:'10px'}}>
               <span className="flow-badge done">别名规则 {Object.keys(modalRules.personAliases).length}</span>
-              <span className="flow-badge active">解析规则 {modalRules.typeRules.length + modalRules.weekdayRules.length + modalRules.ignoreRules.length}</span>
+              <span className="flow-badge active">解析规则 {modalRules.typeRules.length + modalRules.weekdayRules.length + modalRules.ignoreRules.length + modalRules.hourRules.length}</span>
             </div>
             <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleFile}/>
             <div style={{display:'flex',gap:'10px',alignItems:'center'}}>
@@ -3550,7 +3913,7 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
                 <strong>姓名映射规则</strong>
                 <div className="flow-actions">
                   <button className="btn btn-sm" onClick={saveRuleLibrary}>保存规则库</button>
-                  <button className="btn btn-sm btn-danger" onClick={resetRuleLibrary}>清空规则库</button>
+                  <button className="btn btn-sm btn-danger" onClick={resetRuleLibrary}>恢复默认规则</button>
                 </div>
               </div>
               <div style={{fontSize:'12px',color:'var(--muted)',marginBottom:'8px',lineHeight:1.7}}>
@@ -3596,6 +3959,29 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
                 )) : <div className="rule-empty">暂无类型关键词规则。</div>}
               </div>
               {typeRulePreview && <div className="rule-note">现有类型规则：{typeRulePreview}</div>}
+            </div>
+
+            <div className="rule-block">
+              <div className="rule-block-title"><strong>工时规则</strong><span style={{fontSize:'11px',color:'var(--muted)'}}>关键词命中后写入实际工时；周日可单独加倍</span></div>
+              <div style={{fontSize:'12px',color:'var(--muted)',marginBottom:'8px',lineHeight:1.7}}>
+                未命中固定规则的时间段仍按起止时间自动计算。默认规则：洗抹布/值日 1h；晚巡 1h、周日 ×2；负责人两个区域合计 1h、周日合计 2h。
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'minmax(180px,1fr) 120px 140px auto',gap:8,marginBottom:8}}>
+                <input className="inp" placeholder="关键词，如：临时巡查" value={hourKeyword} onChange={e=>setHourKeyword(e.target.value)}/>
+                <input className="inp" type="number" min="0" step="0.25" placeholder="基础工时" value={hourValue} onChange={e=>setHourValue(e.target.value)}/>
+                <input className="inp" type="number" min="0.1" step="0.1" placeholder="周日倍率" value={hourSundayMultiplier} onChange={e=>setHourSundayMultiplier(e.target.value)}/>
+                <button className="btn btn-sm" onClick={addHourRule}>新增 / 覆盖</button>
+              </div>
+              <div className="rule-list">
+                {modalRules.hourRules.length ? modalRules.hourRules.map(rule=>(
+                  <div key={rule.id} className="rule-chip">
+                    <code>{rule.keyword}</code><span className="sp">→</span><strong>{rule.hours}h</strong>
+                    {rule.sundayMultiplier!==1 && <span>· 周日 ×{rule.sundayMultiplier}</span>}
+                    <button className="btn btn-sm btn-danger" onClick={()=>removeRule('hourRules', rule.id)}>删除</button>
+                  </div>
+                )) : <div className="rule-empty">暂无固定工时规则；时间段仍按实际时长计算。</div>}
+              </div>
+              {hourRulePreview && <div className="rule-note">当前工时规则：{hourRulePreview}</div>}
             </div>
 
             <div className="rule-block">

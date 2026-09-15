@@ -54,8 +54,21 @@ function loadLS(key, def) {
   try { const v=localStorage.getItem(key); return v?JSON.parse(v):def; } catch { return def; }
 }
 
+const DEFAULT_HOUR_RULES = [
+  {id:'hr_leader', keyword:'负责人', hours:1, sundayMultiplier:2, kind:'leader'},
+  {id:'hr_night_patrol', keyword:'晚巡', hours:1, sundayMultiplier:2, kind:'night_patrol'},
+  {id:'hr_evening_duty', keyword:'晚上值日', hours:1, sundayMultiplier:1, kind:'duty'},
+  {id:'hr_duty', keyword:'值日', hours:1, sundayMultiplier:1, kind:'duty'},
+  {id:'hr_wash', keyword:'洗', hours:1, sundayMultiplier:1, kind:'wash'},
+];
+
+function defaultHourRules() {
+  return DEFAULT_HOUR_RULES.map(r=>({...r}));
+}
+
 function makeEmptyScheduleRules() {
-  return { personAliases:{}, typeRules:[], weekdayRules:[], ignoreRules:[] };
+  // “空规则库”仍保留业务默认工时规则；姓名/类型/星期映射保持为空。
+  return { personAliases:{}, typeRules:[], weekdayRules:[], ignoreRules:[], hourRules:defaultHourRules() };
 }
 
 function normalizeScheduleRules(input) {
@@ -63,6 +76,21 @@ function normalizeScheduleRules(input) {
   if (!input || typeof input !== 'object') return base;
   const personAliases = input.personAliases && typeof input.personAliases === 'object' ? input.personAliases : {};
   const mapArr = (arr, mapFn) => Array.isArray(arr) ? arr.map(mapFn).filter(Boolean) : [];
+  const normalizedHourRules = Array.isArray(input.hourRules)
+    ? mapArr(input.hourRules, r => {
+        const keyword = normStr(r?.keyword || '');
+        const hours = parseFloat(r?.hours);
+        const sundayMultiplier = parseFloat(r?.sundayMultiplier);
+        if (!keyword || !Number.isFinite(hours) || hours < 0) return null;
+        return {
+          id:r?.id || uid(),
+          keyword,
+          hours,
+          sundayMultiplier:Number.isFinite(sundayMultiplier) && sundayMultiplier > 0 ? sundayMultiplier : 1,
+          kind:normStr(r?.kind || '') || 'fixed',
+        };
+      })
+    : defaultHourRules();
   return {
     personAliases,
     typeRules: mapArr(input.typeRules, r => {
@@ -82,11 +110,12 @@ function normalizeScheduleRules(input) {
       if (!keyword) return null;
       return { id:r?.id || uid(), keyword };
     }),
+    hourRules: normalizedHourRules,
   };
 }
 
 function ensureScheduleRules(rules) {
-  return rules && rules.personAliases && Array.isArray(rules.typeRules) && Array.isArray(rules.weekdayRules) && Array.isArray(rules.ignoreRules)
+  return rules && rules.personAliases && Array.isArray(rules.typeRules) && Array.isArray(rules.weekdayRules) && Array.isArray(rules.ignoreRules) && Array.isArray(rules.hourRules)
     ? rules
     : normalizeScheduleRules(rules);
 }
@@ -106,6 +135,64 @@ function parseTimeMins(label) {
   let end   = parseInt(m[3])*60+parseInt(m[4]);
   if (end <= start) end += 24*60;
   return end - start;
+}
+
+function parseTimeStartMins(label) {
+  const s = normStr(label);
+  const m = s.match(/(\d{1,2}):(\d{2})\s*[-~]/);
+  if (!m) return null;
+  return parseInt(m[1],10)*60 + parseInt(m[2],10);
+}
+
+function inferScheduleHours(label, weekday, parserRules, context = {}) {
+  const rules = ensureScheduleRules(parserRules);
+  const role = context.role || '';
+  const contextLabel = normStr(context.contextLabel || '');
+  const sectionKind = context.sectionKind || '';
+  const sourceText = normStr(`${contextLabel} ${label}`);
+  const sunday = Number(weekday) === 6;
+
+  if (role === 'leader') {
+    const rule = rules.hourRules.find(r=>r.keyword === '负责人') || {hours:1,sundayMultiplier:2,kind:'leader'};
+    return {
+      hours: rule.hours * (sunday ? rule.sundayMultiplier : 1),
+      kind: 'leader',
+      reason: sunday ? '周日晚巡负责人双倍' : '晚巡负责人',
+    };
+  }
+
+  // “晚巡”有时只写 21:00-22:00，不写“晚巡”二字；巡视组夜间时段按晚巡处理。
+  const startMins = parseTimeStartMins(label);
+  const structuralNightPatrol = sectionKind === 'patrol' && startMins != null && startMins >= 20*60;
+  if (structuralNightPatrol && !sourceText.includes('晚巡')) {
+    const rule = rules.hourRules.find(r=>r.keyword === '晚巡') || {hours:1,sundayMultiplier:2,kind:'night_patrol'};
+    return {
+      hours: rule.hours * (sunday ? rule.sundayMultiplier : 1),
+      kind: 'night_patrol',
+      reason: sunday ? '周日晚巡双倍' : '晚巡',
+    };
+  }
+
+  const fixedRules = [...rules.hourRules].sort((a,b)=>b.keyword.length-a.keyword.length);
+  for (const rule of fixedRules) {
+    if (sourceText.includes(rule.keyword)) {
+      return {
+        hours: rule.hours * (sunday ? rule.sundayMultiplier : 1),
+        kind: rule.kind || 'fixed',
+        reason: sunday && rule.sundayMultiplier !== 1
+          ? `${rule.keyword} · 周日×${rule.sundayMultiplier}`
+          : `${rule.keyword}固定工时`,
+      };
+    }
+  }
+
+  const mins = parseTimeMins(label);
+  if (mins != null && mins > 0) {
+    return { hours: mins/60, kind:'time_range', reason:'按实际时间范围计算' };
+  }
+
+  const fallback = Number.isFinite(context.defaultHours) ? context.defaultHours : 0;
+  return { hours:fallback, kind:'default', reason:'按工时类型默认值' };
 }
 
 // Type labels that explicitly map to 1h (shortest type)
@@ -288,10 +375,25 @@ function parseScheduleSheetNew(ws, types, personnel, parserRules) {
   const unmatchedSet = new Set();
   const signRowsExt = [...signRows, maxR+1];
 
+  function detectSectionKind(hr) {
+    const words = [];
+    for (let rr=Math.max(0,hr-4); rr<=hr; rr++) {
+      for (let cc=0; cc<=maxC; cc++) {
+        const v = G(rr,cc);
+        if (v) words.push(v);
+      }
+    }
+    const joined = words.join(' ');
+    if (/巡视|巡查|晚巡/.test(joined)) return 'patrol';
+    if (/值班/.test(joined)) return 'duty';
+    return 'other';
+  }
+
   for (let si=0; si<signRows.length; si++) {
     const hr        = signRows[si];
     const dataStart = hr + 1;
     const dataEnd   = signRowsExt[si+1] - 2;
+    const sectionKind = detectSectionKind(hr);
     if (dataStart > dataEnd) continue;
 
     // ── 2a. Deduplicate sign_cols: keep first of each consecutive run ──
@@ -360,13 +462,23 @@ function parseScheduleSheetNew(ws, types, personnel, parserRules) {
       }
 
       const weekdayLabel = foundWdCol >= 0 ? (G(hr, foundWdCol) || '') : '';
-      groups.push({wd: foundWd, pcols, typeCol, sc, weekdayLabel});
+      const contextLabels = [...new Set(pcols.map(cc=>G(hr,cc)).filter(Boolean))]
+        .filter(v=>extractWeekday(v, rules) === null && v !== '签到' && v !== '楼层' && v !== '时间');
+      const contextLabel = contextLabels.join(' ');
+      groups.push({wd: foundWd, pcols, typeCol, sc, weekdayLabel, contextLabel, sectionKind});
     }
 
     // ── 2c. Process data rows ─────────────────────────────────────────
     for (let r=dataStart; r<=dataEnd; r++) {
       for (const grp of groups) {
-        const typeRaw = Gsafe(r, grp.typeCol);
+        let typeRaw = Gsafe(r, grp.typeCol);
+        const rowHasPeople = grp.pcols.some(cc=>{
+          const nm = G(r,cc);
+          return nm && isPersonName(nm, rules);
+        });
+        // 负责人行常见 A 列为空：巡视表表头后的第一行若有人名，则按结构角色识别为负责人。
+        const structuralLeader = !typeRaw && r === dataStart && grp.wd !== null && grp.sectionKind === 'patrol' && rowHasPeople;
+        if (structuralLeader) typeRaw = '负责人';
         if (!typeRaw) continue;
         const typeNorm = normStr(typeRaw);
 
@@ -376,6 +488,13 @@ function parseScheduleSheetNew(ws, types, personnel, parserRules) {
 
         const wt = classifyByTypes(typeNorm, types, rules);
         if (!wt) continue;
+        const role = structuralLeader || typeNorm === '负责人' ? 'leader' : 'task';
+        const hourMeta = inferScheduleHours(typeNorm, wd, rules, {
+          role,
+          contextLabel:grp.contextLabel,
+          sectionKind:grp.sectionKind,
+          defaultHours:wt.hours,
+        });
         cellMatchType[`${r},${grp.typeCol}`] = 'type';
 
         const seenAnchors = new Set();
@@ -401,6 +520,11 @@ function parseScheduleSheetNew(ws, types, personnel, parserRules) {
               rowLimit: typeNorm,
               personName: pObj.name,
               typeName: wt.name,
+              hours: hourMeta.hours,
+              role,
+              semanticKind: hourMeta.kind,
+              hoursReason: hourMeta.reason,
+              contextLabel: grp.contextLabel || null,
             };
           } else {
             unmatchedSet.add(nm);
@@ -410,6 +534,27 @@ function parseScheduleSheetNew(ws, types, personnel, parserRules) {
       }
     }
   }
+
+  // 负责人同时覆盖两个区域：同一天负责人槽位合计 1h，周日合计 2h。
+  // 将总工时均摊到负责人槽位，既保留两个区域的可视化位置，又避免重复计时。
+  const leaderGroups = {};
+  Object.values(cellSlotMap).forEach(slot=>{
+    if (slot?.role !== 'leader') return;
+    const key = String(slot.weekday);
+    leaderGroups[key] = leaderGroups[key] || [];
+    leaderGroups[key].push(slot);
+  });
+  Object.entries(leaderGroups).forEach(([wd, slots])=>{
+    if (!slots.length) return;
+    const leaderRule = rules.hourRules.find(r=>r.keyword === '负责人') || {hours:1,sundayMultiplier:2};
+    const total = leaderRule.hours * (Number(wd) === 6 ? leaderRule.sundayMultiplier : 1);
+    const each = total / slots.length;
+    slots.forEach(slot=>{
+      slot.hours = each;
+      slot.creditGroupKey = `leader|${wd}`;
+      slot.hoursReason = `负责人跨区域合计${total}h（${slots.length}个区域均摊）`;
+    });
+  });
 
   return {
     result,
