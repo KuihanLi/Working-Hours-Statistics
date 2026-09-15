@@ -3355,6 +3355,7 @@ function PreviewTabs({ parseResult, personnel, types, WD_LABELS, initialTab='sum
   const CELL_COLORS = {
     matched:   {bg:'var(--green)33',  color:'var(--green)',  border:'var(--green)66',  label:'已匹配人员'},
     unmatched: {bg:'var(--yellow)22', color:'var(--yellow)', border:'var(--yellow)66', label:'未匹配人员'},
+    'leader-candidate': {bg:'var(--yellow)26', color:'var(--yellow)', border:'var(--yellow)88', label:'待确认负责人候选'},
     type:      {bg:'var(--accent)22', color:'var(--accent)', border:'var(--accent)55', label:'工时类型'},
   };
 
@@ -3695,12 +3696,14 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
   const [hourKeyword, setHourKeyword] = useState('');
   const [hourValue, setHourValue] = useState('1');
   const [hourSundayMultiplier, setHourSundayMultiplier] = useState('1');
+  const [leaderSlotKeys, setLeaderSlotKeys] = useState([]);
   const fileRef = useRef();
   const WD_LABELS = ['周一','周二','周三','周四','周五','周六','周日'];
 
-  function rerunParse(sheet = ws, rules = modalRules) {
+  function rerunParse(sheet = ws, rules = modalRules, nextLeaderSlotKeys = leaderSlotKeys) {
     if (!sheet) return;
-    const res = parseScheduleSheetNew(sheet, types, personnel, rules);
+    const keys = Array.isArray(nextLeaderSlotKeys) ? nextLeaderSlotKeys : [];
+    const res = parseScheduleSheetNew(sheet, types, personnel, rules, { leaderSlotKeys:keys });
     setParseResult(res);
     if (!res.error) setEditData(JSON.parse(JSON.stringify(res.result)));
   }
@@ -3715,7 +3718,8 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
         const wb = XLSX.read(ev.target.result, {type:'binary'});
         const sheet = wb.Sheets[wb.SheetNames[0]];
         setWs(sheet);
-        const res = parseScheduleSheetNew(sheet, types, personnel, modalRules);
+        setLeaderSlotKeys([]);
+        const res = parseScheduleSheetNew(sheet, types, personnel, modalRules, { leaderSlotKeys:[] });
         setParseResult(res);
         if (!res.error) {
           setEditData(JSON.parse(JSON.stringify(res.result)));
@@ -3824,6 +3828,11 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
   const weekdayRulePreview = modalRules.weekdayRules.slice(0,3).map(rule=>`${rule.keyword} → ${WD_LABELS[rule.weekday]}`).join('，');
   const ignoreRulePreview = modalRules.ignoreRules.slice(0,4).map(rule=>rule.keyword).join('、');
   const hourRulePreview = modalRules.hourRules.slice(0,4).map(rule=>`${rule.keyword} ${rule.hours}h${rule.sundayMultiplier!==1?` · 周日×${rule.sundayMultiplier}`:''}`).join('，');
+  const leaderCandidates = parseResult?.leaderCandidates || [];
+  const selectedLeaderCandidates = leaderCandidates.filter(item=>item.selected);
+  const unconfirmedLeaderCandidates = leaderCandidates.filter(item=>item.matched && !item.selected);
+  const pairedLeaderCandidates = leaderCandidates.filter(item=>item.paired && item.matched);
+  const explicitLeaderCount = Object.values(parseResult?.cellSlotMap || {}).filter(slot=>slot?.role==='leader' && slot?.leaderSource==='explicit_label').length;
   const typeKeywordPlaceholder = modalRules.typeRules.length
     ? `例如：${modalRules.typeRules[0].keyword} → ${modalRules.typeRules[0].typeName}`
     : types.length
@@ -3835,6 +3844,30 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
   const ignoreKeywordPlaceholder = modalRules.ignoreRules.length
     ? `例如：忽略“${modalRules.ignoreRules[0].keyword}”`
     : '例如：忽略“备用”';
+
+  function applyLeaderSelection(nextKeys) {
+    const unique = [...new Set((nextKeys || []).filter(Boolean))];
+    setLeaderSlotKeys(unique);
+    rerunParse(ws, modalRules, unique);
+  }
+
+  function toggleLeaderCandidate(slotKey) {
+    const next = new Set(leaderSlotKeys);
+    next.has(slotKey) ? next.delete(slotKey) : next.add(slotKey);
+    applyLeaderSelection([...next]);
+  }
+
+  function selectPairedLeaderCandidates() {
+    applyLeaderSelection(pairedLeaderCandidates.map(item=>item.slotKey));
+  }
+
+  function selectAllLeaderCandidates() {
+    applyLeaderSelection(leaderCandidates.filter(item=>item.matched).map(item=>item.slotKey));
+  }
+
+  function clearLeaderCandidates() {
+    applyLeaderSelection([]);
+  }
 
   function doSave() {
     if (!editData) return;
@@ -3878,7 +3911,8 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
               <strong style={{color:'var(--text)'}}>支持格式：</strong>
               时间段（<code>7:05-9:35</code>）、类型+时段（<code>晚巡21:00-22:00</code>）、
               日期+时段（<code>周六7:30-9:30</code>）、日期（<code>周一</code>）、
-              类型（<code>晚上值日</code>、<code>负责人</code>）均自动匹配；负责人标签缺失时也会按巡视表结构识别。
+              类型（<code>晚上值日</code>、<code>负责人</code>）均可识别。<strong style={{color:'var(--yellow)'}}>负责人文字不是必需项：</strong>
+              无标签时系统只把巡视表首个人员行列为“负责人候选”，下一步可按“同日同名跨区域”一键确认，也可逐个勾选；未确认候选不会计工时。
               值班默认按实际时间范围计时，晚巡/负责人支持周日倍率。
             </div>
             <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginBottom:'10px'}}>
@@ -3904,6 +3938,7 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
           <div>
             <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginBottom:'12px'}}>
               <span className={`flow-badge ${parseResult.unmatched.length ? 'todo' : 'done'}`}>未匹配姓名 {parseResult.unmatched.length}</span>
+              <span className={`flow-badge ${unconfirmedLeaderCandidates.length ? 'todo' : 'done'}`}>待确认负责人 {unconfirmedLeaderCandidates.length}</span>
               <span className="flow-badge active">规则总数 {totalRuleCount}</span>
               <span className="flow-badge active">已识别记录 {Object.values(parseResult.result||{}).reduce((s,d)=>s+Object.values(d).reduce((ss,tt)=>ss+Object.values(tt).reduce((n,v)=>n+v,0),0),0)}</span>
             </div>
@@ -3935,6 +3970,49 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
                 </div>
               ) : (
                 <div className="rule-empty">当前文件没有未匹配姓名，可以继续配置类型、星期和忽略规则。</div>
+              )}
+            </div>
+
+            <div className="rule-block">
+              <div className="rule-block-title">
+                <strong>负责人识别（无标签排班）</strong>
+                <span style={{fontSize:'11px',color:'var(--muted)'}}>只对当前导入文件生效，不把行号写进全局规则</span>
+              </div>
+              <div style={{fontSize:'12px',color:'var(--muted)',marginBottom:'8px',lineHeight:1.7}}>
+                参考表里的“负责人”文字可能是后补的，因此系统不再把“巡视表首行 = 负责人”直接作为最终结论。
+                首个人员行仅列为候选；若同一天同一姓名同时出现在两个巡视区域，会标记为高置信“成对候选”。
+                确认后才按“两个区域合计 1h、周日合计 2h”计入。
+              </div>
+              {leaderCandidates.length ? (
+                <>
+                  <div className="flow-actions" style={{marginBottom:'8px',flexWrap:'wrap'}}>
+                    <button className="btn btn-sm btn-primary" disabled={!pairedLeaderCandidates.length} onClick={selectPairedLeaderCandidates}>
+                      一键采用成对候选（{pairedLeaderCandidates.length}）
+                    </button>
+                    <button className="btn btn-sm" onClick={selectAllLeaderCandidates}>采用全部结构候选（{leaderCandidates.filter(item=>item.matched).length}）</button>
+                    <button className="btn btn-sm btn-danger" disabled={!selectedLeaderCandidates.length} onClick={clearLeaderCandidates}>清空负责人确认</button>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))',gap:6}}>
+                    {leaderCandidates.map(item=>(
+                      <label key={item.slotKey} style={{display:'flex',alignItems:'center',gap:8,padding:'7px 9px',border:'1px solid var(--border)',borderRadius:8,
+                        background:item.selected?'var(--green)12':item.paired?'var(--yellow)12':'var(--surface2)',cursor:item.matched?'pointer':'not-allowed',opacity:item.matched?1:.65}}>
+                        <input type="checkbox" checked={Boolean(item.selected)} disabled={!item.matched} onChange={()=>toggleLeaderCandidate(item.slotKey)} />
+                        <span style={{minWidth:0,flex:1}}>
+                          <strong style={{color:item.selected?'var(--green)':item.paired?'var(--yellow)':'var(--text)'}}>{item.personName}</strong>
+                          <span style={{color:'var(--muted)'}}> · {WD_LABELS[item.weekday]} · {item.sectionLabel || '巡视区'}</span>
+                          <span style={{display:'block',fontSize:'10px',color:'var(--muted)'}}>Excel {String.fromCharCode(65 + Math.min(item.col,25))}{item.row+1}{item.paired?' · 同日同名跨区域':''}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="rule-note" style={{marginTop:8}}>
+                    已确认 {selectedLeaderCandidates.length}/{leaderCandidates.filter(item=>item.matched).length} 个候选；未确认的候选不会进入模板。
+                  </div>
+                </>
+              ) : (
+                <div className="rule-empty">
+                  当前文件没有无标签负责人候选{explicitLeaderCount ? `；已从显式“负责人”行识别 ${explicitLeaderCount} 个负责人槽位。` : '。'}
+                </div>
               )}
             </div>
 
@@ -4025,7 +4103,7 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
 
             <div style={{fontSize:'12px',color:'var(--yellow)',marginBottom:'12px',padding:'8px 12px',
               background:'var(--yellow)1a',borderRadius:6,border:'1px solid var(--yellow)'}}>
-              ⚠ 如果当前解析仍有缺口，先在上面补规则并保存，再进入下一步人工编辑。
+              ⚠ 如果当前解析仍有缺口，先在上面补规则。无标签负责人候选请先确认；未确认候选不会计入模板，但不会阻止您继续检查其他内容。
             </div>
             <div style={{marginTop:'14px',display:'flex',gap:'8px'}}>
               <button className="btn" onClick={()=>setStep(1)}>← 返回</button>
@@ -4049,6 +4127,9 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
               {parseResult?.unmatched?.length>0 && (
                 <span style={{color:'var(--yellow)'}}>⚠ {parseResult.unmatched.length} 个姓名仍未匹配，可返回继续补规则</span>
               )}
+              {unconfirmedLeaderCandidates.length>0 && (
+                <span style={{color:'var(--yellow)'}}>⚠ {unconfirmedLeaderCandidates.length} 个负责人候选未确认，不会计入模板</span>
+              )}
               <span style={{fontSize:'11px',color:'var(--muted)',marginLeft:'auto'}}>
                 💡 这里先把周模板校准干净；保存后先指派当前周模板，必要时再写入模板数据，最后回按天核对差异
               </span>
@@ -4070,7 +4151,7 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
 
             <div style={{fontSize:'12px',color:'var(--muted)',marginTop:'10px',lineHeight:1.8,
               background:'var(--surface2)',borderRadius:8,padding:'10px 12px'}}>
-              当前阶段只保留原始视图确认。若识别仍有问题，请返回上一步补规则；确认无误后直接保存为模板，并在按周修订模式中完成替换。
+              当前阶段只保留原始视图确认。黄色“待确认负责人候选”必须回上一步勾选后才会计入模板；确认无误后保存为模板，并在按周修订模式中完成替换。
             </div>
 
             {/* Footer */}

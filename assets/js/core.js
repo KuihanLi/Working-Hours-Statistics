@@ -318,8 +318,9 @@ function getSheetDims(ws) {
   return {maxR: rng.e.r, maxC: rng.e.c};
 }
 
-function parseScheduleSheetNew(ws, types, personnel, parserRules) {
+function parseScheduleSheetNew(ws, types, personnel, parserRules, parseOptions = {}) {
   const rules = ensureScheduleRules(parserRules);
+  const leaderSlotKeys = new Set(Array.isArray(parseOptions?.leaderSlotKeys) ? parseOptions.leaderSlotKeys : []);
   const G = buildGrid(ws);
   const getMergeAnchor = buildMergeAnchorGetter(ws);
   const {maxR, maxC} = getSheetDims(ws);
@@ -329,6 +330,7 @@ function parseScheduleSheetNew(ws, types, personnel, parserRules) {
   const cellMatchType = {};
   const cellTypeName = {};
   const cellSlotMap = {};
+  const leaderCandidates = [];
 
   function tryMatch(rawName) {
     if (!rawName) return null;
@@ -375,25 +377,29 @@ function parseScheduleSheetNew(ws, types, personnel, parserRules) {
   const unmatchedSet = new Set();
   const signRowsExt = [...signRows, maxR+1];
 
-  function detectSectionKind(hr) {
+  function detectSectionMeta(hr) {
     const words = [];
+    let label = '';
     for (let rr=Math.max(0,hr-4); rr<=hr; rr++) {
       for (let cc=0; cc<=maxC; cc++) {
         const v = G(rr,cc);
-        if (v) words.push(v);
+        if (!v) continue;
+        words.push(v);
+        if (!label && /巡视|巡查|晚巡|值班|排班/.test(v) && v !== '值班') label = v;
       }
     }
     const joined = words.join(' ');
-    if (/巡视|巡查|晚巡/.test(joined)) return 'patrol';
-    if (/值班/.test(joined)) return 'duty';
-    return 'other';
+    const kind = /巡视|巡查|晚巡/.test(joined) ? 'patrol' : (/值班/.test(joined) ? 'duty' : 'other');
+    return { kind, label: label || (kind === 'patrol' ? '巡视区' : kind === 'duty' ? '值班区' : '排班区') };
   }
 
   for (let si=0; si<signRows.length; si++) {
     const hr        = signRows[si];
     const dataStart = hr + 1;
     const dataEnd   = signRowsExt[si+1] - 2;
-    const sectionKind = detectSectionKind(hr);
+    const sectionMeta = detectSectionMeta(hr);
+    const sectionKind = sectionMeta.kind;
+    const sectionLabel = sectionMeta.label;
     if (dataStart > dataEnd) continue;
 
     // ── 2a. Deduplicate sign_cols: keep first of each consecutive run ──
@@ -465,37 +471,32 @@ function parseScheduleSheetNew(ws, types, personnel, parserRules) {
       const contextLabels = [...new Set(pcols.map(cc=>G(hr,cc)).filter(Boolean))]
         .filter(v=>extractWeekday(v, rules) === null && v !== '签到' && v !== '楼层' && v !== '时间');
       const contextLabel = contextLabels.join(' ');
-      groups.push({wd: foundWd, pcols, typeCol, sc, weekdayLabel, contextLabel, sectionKind});
+      groups.push({wd: foundWd, pcols, typeCol, sc, weekdayLabel, contextLabel, sectionKind, sectionLabel});
     }
 
     // ── 2c. Process data rows ─────────────────────────────────────────
     for (let r=dataStart; r<=dataEnd; r++) {
       for (const grp of groups) {
-        let typeRaw = Gsafe(r, grp.typeCol);
+        const typeRaw = Gsafe(r, grp.typeCol);
         const rowHasPeople = grp.pcols.some(cc=>{
           const nm = G(r,cc);
           return nm && isPersonName(nm, rules);
         });
-        // 负责人行常见 A 列为空：巡视表表头后的第一行若有人名，则按结构角色识别为负责人。
-        const structuralLeader = !typeRaw && r === dataStart && grp.wd !== null && grp.sectionKind === 'patrol' && rowHasPeople;
-        if (structuralLeader) typeRaw = '负责人';
-        if (!typeRaw) continue;
-        const typeNorm = normStr(typeRaw);
+        // 真实排班里“负责人”经常没有文字标签。这里只把巡视表首个人员行列为候选，
+        // 不自动计入工时；必须由导入预览确认后才作为负责人写入模板。
+        const structuralLeaderCandidate = !typeRaw && r === dataStart && grp.wd !== null && grp.sectionKind === 'patrol' && rowHasPeople;
+        if (!typeRaw && !structuralLeaderCandidate) continue;
+        const typeNorm = normStr(typeRaw || '');
+        const explicitLeader = typeNorm === '负责人';
 
         let wd = grp.wd;
-        if (wd === null) wd = extractWeekday(typeRaw, rules);
+        if (wd === null && typeRaw) wd = extractWeekday(typeRaw, rules);
         if (wd === null) continue;
 
-        const wt = classifyByTypes(typeNorm, types, rules);
+        const effectiveTypeLabel = structuralLeaderCandidate ? '负责人' : typeNorm;
+        const wt = classifyByTypes(effectiveTypeLabel, types, rules);
         if (!wt) continue;
-        const role = structuralLeader || typeNorm === '负责人' ? 'leader' : 'task';
-        const hourMeta = inferScheduleHours(typeNorm, wd, rules, {
-          role,
-          contextLabel:grp.contextLabel,
-          sectionKind:grp.sectionKind,
-          defaultHours:wt.hours,
-        });
-        cellMatchType[`${r},${grp.typeCol}`] = 'type';
+        if (typeRaw) cellMatchType[`${r},${grp.typeCol}`] = 'type';
 
         const seenAnchors = new Set();
         for (const cc of grp.pcols) {
@@ -504,31 +505,71 @@ function parseScheduleSheetNew(ws, types, personnel, parserRules) {
           const anchor = getMergeAnchor(r, cc);
           if (seenAnchors.has(anchor)) continue;
           seenAnchors.add(anchor);
+          const slotKey = anchor || `${r},${cc}`;
+          const [slotRowRaw, slotColRaw] = slotKey.split(',').map(Number);
+          const slotRow = Number.isFinite(slotRowRaw) ? slotRowRaw : r;
+          const slotCol = Number.isFinite(slotColRaw) ? slotColRaw : cc;
           const pObj = tryMatch(nm);
+          const manualLeader = structuralLeaderCandidate && leaderSlotKeys.has(slotKey);
+
+          if (structuralLeaderCandidate) {
+            leaderCandidates.push({
+              slotKey,
+              row:slotRow,
+              col:slotCol,
+              weekday:wd,
+              weekdayLabel:grp.weekdayLabel || WD[wd] || '',
+              rawName:nm,
+              personName:pObj?.name || nm,
+              matched:Boolean(pObj),
+              selected:manualLeader,
+              sectionLabel:grp.sectionLabel || '巡视区',
+              contextLabel:grp.contextLabel || null,
+            });
+            if (!manualLeader) {
+              if (pObj) {
+                cellMatchType[slotKey] = 'leader-candidate';
+              } else {
+                unmatchedSet.add(nm);
+                cellMatchType[slotKey] = 'unmatched';
+              }
+              continue;
+            }
+          }
+
           if (pObj) {
+            const role = explicitLeader || manualLeader ? 'leader' : 'task';
+            const hourMeta = inferScheduleHours(effectiveTypeLabel, wd, rules, {
+              role,
+              contextLabel:grp.contextLabel,
+              sectionKind:grp.sectionKind,
+              defaultHours:wt.hours,
+            });
             result[wd] = result[wd]||{};
             result[wd][pObj.name] = result[wd][pObj.name]||{};
             result[wd][pObj.name][wt.name] = (result[wd][pObj.name][wt.name]||0)+1;
-            cellMatchType[`${r},${cc}`] = 'matched';
-            cellTypeName[`${r},${cc}`] = wt.name;
-            cellSlotMap[`${r},${cc}`] = {
-              row: r,
-              col: cc,
-              slotKey: `${r},${cc}`,
+            cellMatchType[slotKey] = 'matched';
+            cellTypeName[slotKey] = wt.name;
+            cellSlotMap[slotKey] = {
+              row: slotRow,
+              col: slotCol,
+              slotKey,
               weekday: wd,
               colLimit: grp.weekdayLabel || WD[wd] || '',
-              rowLimit: typeNorm,
+              rowLimit: role === 'leader' ? '负责人' : effectiveTypeLabel,
               personName: pObj.name,
               typeName: wt.name,
               hours: hourMeta.hours,
               role,
+              leaderSource: role === 'leader' ? (explicitLeader ? 'explicit_label' : 'manual_candidate') : null,
               semanticKind: hourMeta.kind,
               hoursReason: hourMeta.reason,
               contextLabel: grp.contextLabel || null,
+              sectionLabel: grp.sectionLabel || null,
             };
           } else {
             unmatchedSet.add(nm);
-            cellMatchType[`${r},${cc}`] = 'unmatched';
+            cellMatchType[slotKey] = 'unmatched';
           }
         }
       }
@@ -556,6 +597,17 @@ function parseScheduleSheetNew(ws, types, personnel, parserRules) {
     });
   });
 
+  const leaderPairCounts = {};
+  leaderCandidates.forEach(item=>{
+    if (!item.matched) return;
+    const key = `${item.weekday}|${item.personName}`;
+    leaderPairCounts[key] = (leaderPairCounts[key] || 0) + 1;
+  });
+  leaderCandidates.forEach(item=>{
+    const key = `${item.weekday}|${item.personName}`;
+    item.paired = item.matched && (leaderPairCounts[key] || 0) >= 2;
+  });
+
   return {
     result,
     unmatched:[...unmatchedSet],
@@ -563,7 +615,8 @@ function parseScheduleSheetNew(ws, types, personnel, parserRules) {
     rawMerges:(ws['!merges'] || []).map(m=>({ s:{r:m.s.r,c:m.s.c}, e:{r:m.e.r,c:m.e.c} })),
     cellMatchType,
     cellTypeName,
-    cellSlotMap
+    cellSlotMap,
+    leaderCandidates,
   };
 }
 
