@@ -378,19 +378,43 @@ function parseScheduleSheetNew(ws, types, personnel, parserRules, parseOptions =
   const signRowsExt = [...signRows, maxR+1];
 
   function detectSectionMeta(hr) {
-    const words = [];
-    let label = '';
-    for (let rr=Math.max(0,hr-4); rr<=hr; rr++) {
+    const classify = (text) => {
+      const s = normStr(text || '');
+      if (/巡视|巡查|晚巡/.test(s)) return 'patrol';
+      if (/值班/.test(s)) return 'duty';
+      return 'other';
+    };
+
+    // Prefer the nearest explicit section title above this 签到 header.
+    // Do not aggregate arbitrary rows: merged task labels from the previous block
+    // (e.g. A4:A8 = “晚巡21:00-22:00”) otherwise leak into the next 值班 block.
+    for (let rr=hr-1; rr>=Math.max(0,hr-6); rr--) {
+      const rowVals = [];
       for (let cc=0; cc<=maxC; cc++) {
         const v = G(rr,cc);
-        if (!v) continue;
-        words.push(v);
-        if (!label && /巡视|巡查|晚巡|值班|排班/.test(v) && v !== '值班') label = v;
+        if (v) rowVals.push(v);
+      }
+      if (rowVals.length === 0) break;
+
+      const title = rowVals.find(v =>
+        (/(排班|安排)/.test(v) && /巡视|巡查|晚巡|值班/.test(v)) ||
+        /(巡视组|值班组|周末值班|中午巡视)/.test(v)
+      );
+      if (title) {
+        const kind = classify(title);
+        return { kind, label:title };
       }
     }
-    const joined = words.join(' ');
-    const kind = /巡视|巡查|晚巡/.test(joined) ? 'patrol' : (/值班/.test(joined) ? 'duty' : 'other');
-    return { kind, label: label || (kind === 'patrol' ? '巡视区' : kind === 'duty' ? '值班区' : '排班区') };
+
+    // Fallback to the current header only. This cannot cross into the previous block.
+    const headerVals = [];
+    for (let cc=0; cc<=maxC; cc++) {
+      const v = G(hr,cc);
+      if (v) headerVals.push(v);
+    }
+    const joined = headerVals.join(' ');
+    const kind = classify(joined);
+    return { kind, label: kind === 'patrol' ? '巡视区' : kind === 'duty' ? '值班区' : '排班区' };
   }
 
   for (let si=0; si<signRows.length; si++) {
