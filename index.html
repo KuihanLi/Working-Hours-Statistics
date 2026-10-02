@@ -107,6 +107,7 @@ function App() {
   const LS_TEMPLATE_LIBRARY = 'wh_template_library';
   const LS_WEEK_TEMPLATE_MAP = 'wh_week_template_map';
   const LS_WEEK_DAY_LOCKS = 'wh_week_day_locks';
+  const LS_WEEK_CELL_ANNOTATIONS = 'wh_week_cell_annotations';
   const [personnel, setPersonnel] = useState(()=>loadLS('wh_personnel', DEF_PERSONNEL));
   const [types, setTypes]         = useState(()=>loadLS('wh_types', DEF_TYPES));
   const [records, setRecords]     = useState(()=>normalizeRecordsModel(loadLS('wh_records', {}), types));
@@ -134,6 +135,7 @@ function App() {
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [weekTemplateMap, setWeekTemplateMap] = useState(()=>loadLS(LS_WEEK_TEMPLATE_MAP, {}));
   const [weekDayLocks, setWeekDayLocks] = useState(()=>loadLS(LS_WEEK_DAY_LOCKS, {}));
+  const [weekCellAnnotations, setWeekCellAnnotations] = useState(()=>loadLS(LS_WEEK_CELL_ANNOTATIONS, {}));
   const [hiddenIds, setHiddenIds] = useState(()=>{ try{ return new Set(JSON.parse(localStorage.getItem('wh_hidden')||'[]')); }catch{ return new Set(); } });
   const [autoHide,  setAutoHide]  = useState(()=>loadLS('wh_autohide', false));
   const [showDiff,  setShowDiff]  = useState(false);
@@ -167,6 +169,9 @@ function App() {
   useEffect(()=>{
     localStorage.setItem(LS_WEEK_DAY_LOCKS, JSON.stringify(weekDayLocks));
   },[weekDayLocks]);
+  useEffect(()=>{
+    localStorage.setItem(LS_WEEK_CELL_ANNOTATIONS, JSON.stringify(weekCellAnnotations));
+  },[weekCellAnnotations]);
   useEffect(()=>{
     localStorage.setItem('wh_flow_collapsed', JSON.stringify(flowCollapsed));
   },[flowCollapsed]);
@@ -669,17 +674,61 @@ function App() {
     return assignTemplateSlots(templateObj, weekDatesArr);
   }
 
-  function buildRawLikeWorksheet(templateObj, slotByKey = null) {
+  function getWeekAnnotationOverrides(weekKey, templateId) {
+    if (!weekKey) return {};
+    return mergeWeekAnnotationOverrides(weekCellAnnotations?.[weekKey] || {}, templateId);
+  }
+
+  function getEffectiveRevisionAnnotations(templateObj, weekKey) {
+    const baseline = templateObj?.preview?.cellAnnotations || {};
+    const overrides = getWeekAnnotationOverrides(weekKey, templateObj?.id);
+    const out = {};
+    Object.entries(baseline).forEach(([key, value])=>{
+      const ann = normalizeRevisionCellAnnotation(value, value?.baseValue || '');
+      if (ann) out[key] = ann;
+    });
+    Object.entries(overrides).forEach(([key, value])=>{
+      if (value?.deleted) delete out[key];
+      else {
+        const ann = normalizeRevisionCellAnnotation(value, value?.baseValue || baseline?.[key]?.baseValue || '');
+        if (ann) out[key] = ann;
+      }
+    });
+    return out;
+  }
+
+  function collectRevisionBonusHours(dateList) {
+    const bonusByPid = Object.fromEntries(personnel.map(p=>[p.id, 0]));
+    const pidByName = Object.fromEntries(personnel.map(p=>[p.name, p.id]));
+    const weekKeys = [...new Set((dateList || []).map(d=>fmt(getMonday(new Date(`${d}T00:00:00`)))))];
+    weekKeys.forEach(weekKey=>{
+      const templateId = weekTemplateMap?.[weekKey];
+      if (!templateId) return;
+      const overrides = getWeekAnnotationOverrides(weekKey, templateId);
+      Object.values(overrides).forEach(value=>{
+        if (!value || value.deleted) return;
+        const ann = normalizeRevisionCellAnnotation(value, value.baseValue || '');
+        if (!ann || !ann.name || !ann.rewardHours) return;
+        const pid = pidByName[ann.name];
+        if (pid) bonusByPid[pid] = (bonusByPid[pid] || 0) + ann.rewardHours;
+      });
+    });
+    return bonusByPid;
+  }
+
+  function buildRawLikeWorksheet(templateObj, slotByKey = null, annotationMap = {}) {
     const preview = templateObj?.preview;
     if (!preview?.rawGrid) return null;
     const aoa = preview.rawGrid.map((row, r)=>row.map((cell, c)=>{
+      const key = `${r},${c}`;
+      let baseValue = cell?.val || '';
       if (slotByKey) {
-        const key = `${r},${c}`;
         const slotEntry = slotByKey[key];
-        // Only substitute cells that are actual person slots
-        if (slotEntry !== undefined) return slotEntry.currentPerson || '';
+        // Only substitute cells that are actual person slots.
+        if (slotEntry !== undefined) baseValue = slotEntry.currentPerson || '';
       }
-      return cell?.val || '';
+      const ann = annotationMap?.[key];
+      return ann ? serializeRevisionCellPayload(ann, baseValue) : baseValue;
     }));
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     ws['!merges'] = (preview.rawMerges || []).map(m=>({
@@ -690,119 +739,133 @@ function App() {
     ws['!cols'] = Array.from({length:maxCols}, (_, idx)=>{
       let longest = 8;
       aoa.forEach(row=>{ longest = Math.max(longest, String(row[idx] || '').length); });
-      return { wch: Math.max(8, Math.min(18, longest + 2)) };
+      return { wch: Math.max(8, Math.min(24, longest + 2)) };
     });
     return ws;
   }
 
+  function exportFileName(rangeDates, modeLabel) {
+    const first = rangeDates[0];
+    const last = rangeDates[rangeDates.length-1];
+    const fmtNameDate = d => String(d || '').replace(/-/g, '.');
+    return `工时统计_${fmtNameDate(first)}-${fmtNameDate(last)}_${modeLabel}.xlsx`;
+  }
+
   /* ── Export Excel ── */
-  function exportExcel(mode, rangeStart, rangeEnd, bonusHours = {}) {
+  function exportExcel(modes, rangeStart, rangeEnd, bonusHours = {}) {
     let allDates = Object.keys(records).sort();
     if (!allDates.length) { alert('暂无记录可导出'); return; }
     if (rangeStart) allDates = allDates.filter(d=>d>=rangeStart);
     if (rangeEnd)   allDates = allDates.filter(d=>d<=rangeEnd);
     if (!allDates.length) { alert('所选时间段内无记录'); return; }
-    const wb = XLSX.utils.book_new();
+    const selectedModes = Array.isArray(modes) ? [...new Set(modes)] : [modes].filter(Boolean);
+    if (!selectedModes.length) { alert('请至少选择一种导出内容'); return; }
 
-    /* Sheet: 小时统计(按日) */
-    if (mode==='day'||mode==='both') {
-      const hdr = ['姓名', ...allDates.map(d=>d.slice(5)), '奖励工时(h)', '合计(h)'];
-      const body = personnel.map(p => {
-        let tot=0;
-        const bonus = parseFloat(bonusHours[p.id]) || 0;
-        const row = [p.name, ...allDates.map(d=>{ const h=dayHours(d,p.id); tot+=h; return h||0; }), bonus||0, tot + bonus];
-        return row;
-      });
-      const bonusTotal = personnel.reduce((s,p)=>s+(parseFloat(bonusHours[p.id])||0),0);
-      const foot = ['合计', ...allDates.map(d=>personnel.reduce((s,p)=>s+dayHours(d,p.id),0)),
-                    bonusTotal,
-                    personnel.reduce((s,p)=>s+allDates.reduce((h,d)=>h+dayHours(d,p.id),0),0) + bonusTotal];
-      const ws = XLSX.utils.aoa_to_sheet([hdr,...body,foot]);
-      _styleSheet(ws, allDates.length+2);
-      XLSX.utils.book_append_sheet(wb, ws, '小时统计(按日)');
+    const revisionBonus = collectRevisionBonusHours(allDates);
+    const totalBonusFor = (pid) => (revisionBonus[pid] || 0) + (parseFloat(bonusHours[pid]) || 0);
+    const weekMap = {};
+    for (const d of allDates) {
+      const mon = getMonday(new Date(`${d}T00:00:00`));
+      const key = fmt(mon);
+      const sun = addDays(mon,6);
+      if (!weekMap[key]) weekMap[key]={label:`${fmtMid(mon)}~${fmtMid(sun)}`,dates:[]};
+      weekMap[key].dates.push(d);
     }
+    const wks = Object.keys(weekMap).sort();
 
-    /* Sheet: 小时统计(按周) */
-    if (mode==='week'||mode==='both') {
-      const weekMap = {};
-      for (const d of allDates) {
-        const mon = getMonday(new Date(d));
-        const key = fmt(mon);
-        const sun = addDays(mon,6);
-        if (!weekMap[key]) weekMap[key]={label:`${fmtMid(mon)}~${fmtMid(sun)}`,dates:[]};
-        weekMap[key].dates.push(d);
-      }
-      const wks = Object.keys(weekMap).sort();
-      const hdr = ['姓名', ...wks.map(k=>weekMap[k].label), '奖励工时(h)', '合计(h)'];
-      const body = personnel.map(p => {
-        let tot=0;
-        const bonus = parseFloat(bonusHours[p.id]) || 0;
-        const row = [p.name, ...wks.map(k=>{ const h=weekMap[k].dates.reduce((s,d)=>s+dayHours(d,p.id),0); tot+=h; return h||0; }), bonus||0, tot + bonus];
-        return row;
-      });
-      const bonusTotal = personnel.reduce((s,p)=>s+(parseFloat(bonusHours[p.id])||0),0);
-      const foot = ['合计', ...wks.map(k=>personnel.reduce((s,p)=>s+weekMap[k].dates.reduce((ss,d)=>ss+dayHours(d,p.id),0),0)),
-                    bonusTotal,
-                    body.reduce((s,row)=>s+(parseFloat(row[row.length-1])||0),0)];
-      const ws = XLSX.utils.aoa_to_sheet([hdr,...body,foot]);
-      XLSX.utils.book_append_sheet(wb, ws, '小时统计(按周)');
-    }
+    for (const mode of selectedModes) {
+      const wb = XLSX.utils.book_new();
+      let modeLabel = '';
 
-    /* Sheet: 工时明细 (importable raw data) */
-    {
-      const hdr = ['姓名','日期', ...types.map(t=>`${t.name}(次)`), ...types.map(t=>`${t.name}(h)`), '总计(h)'];
-      const rows = [];
-      for (const d of allDates) {
-        for (const p of personnel) {
-          const dr = records?.[d]?.[p.id];
-          if (!dr) continue;
-          const dayCounts = types.map(t=>countCell(dr[t.id]));
-          const row = [p.name, d,
-            ...dayCounts,
-            ...types.map(t=>cellHoursFromCell(dr[t.id], t)),
-            dayHours(d,p.id)];
-          rows.push(row);
+      if (mode === 'day') {
+        modeLabel = '按日统计';
+        const hdr = ['姓名', ...allDates.map(d=>d.slice(5)), '奖励工时(h)', '合计(h)'];
+        const body = personnel.map(p => {
+          let tot=0;
+          const bonus = totalBonusFor(p.id);
+          return [p.name, ...allDates.map(d=>{ const h=dayHours(d,p.id); tot+=h; return h||0; }), bonus||0, tot + bonus];
+        });
+        const bonusTotal = personnel.reduce((s,p)=>s+totalBonusFor(p.id),0);
+        const foot = ['合计', ...allDates.map(d=>personnel.reduce((s,p)=>s+dayHours(d,p.id),0)),
+                      bonusTotal,
+                      personnel.reduce((s,p)=>s+allDates.reduce((h,d)=>h+dayHours(d,p.id),0),0) + bonusTotal];
+        const ws = XLSX.utils.aoa_to_sheet([hdr,...body,foot]);
+        _styleSheet(ws, allDates.length+2);
+        XLSX.utils.book_append_sheet(wb, ws, '小时统计(按日)');
+      } else if (mode === 'week') {
+        modeLabel = '按周汇总';
+        const hdr = ['姓名', ...wks.map(k=>weekMap[k].label), '奖励工时(h)', '合计(h)'];
+        const body = personnel.map(p => {
+          let tot=0;
+          const bonus = totalBonusFor(p.id);
+          return [p.name, ...wks.map(k=>{ const h=weekMap[k].dates.reduce((s,d)=>s+dayHours(d,p.id),0); tot+=h; return h||0; }), bonus||0, tot + bonus];
+        });
+        const bonusTotal = personnel.reduce((s,p)=>s+totalBonusFor(p.id),0);
+        const foot = ['合计', ...wks.map(k=>personnel.reduce((s,p)=>s+weekMap[k].dates.reduce((ss,d)=>ss+dayHours(d,p.id),0),0)),
+                      bonusTotal,
+                      body.reduce((s,row)=>s+(parseFloat(row[row.length-1])||0),0)];
+        const ws = XLSX.utils.aoa_to_sheet([hdr,...body,foot]);
+        _styleSheet(ws, wks.length+2);
+        XLSX.utils.book_append_sheet(wb, ws, '小时统计(按周)');
+      } else if (mode === 'detail') {
+        modeLabel = '工时明细';
+        const hdr = ['姓名','日期', ...types.map(t=>`${t.name}(次)`), ...types.map(t=>`${t.name}(h)`), '总计(h)'];
+        const rows = [];
+        for (const d of allDates) {
+          for (const p of personnel) {
+            const dr = records?.[d]?.[p.id];
+            if (!dr) continue;
+            rows.push([p.name, d,
+              ...types.map(t=>countCell(dr[t.id])),
+              ...types.map(t=>cellHoursFromCell(dr[t.id], t)),
+              dayHours(d,p.id)]);
+          }
         }
-      }
-      if (rows.length) {
         const ws = XLSX.utils.aoa_to_sheet([hdr,...rows]);
         XLSX.utils.book_append_sheet(wb, ws, '工时明细');
-      }
-    }
 
-    /* Sheet(s): 修订视图格式 */
-    if (mode==='revise') {
-      const weekMap = {};
-      for (const d of allDates) {
-        const mon = getMonday(new Date(d));
-        const key = fmt(mon);
-        const sun = addDays(mon,6);
-        if (!weekMap[key]) weekMap[key]={label:`${fmtMid(mon)}~${fmtMid(sun)}`, dates:weekDates(mon)};
+        const rewardRows = [];
+        wks.forEach(weekKey=>{
+          const templateId = weekTemplateMap?.[weekKey];
+          if (!templateId) return;
+          const overrides = getWeekAnnotationOverrides(weekKey, templateId);
+          Object.entries(overrides).forEach(([cellKey,value])=>{
+            if (!value || value.deleted) return;
+            const ann = normalizeRevisionCellAnnotation(value, value.baseValue || '');
+            if (!ann || !ann.name || (!ann.rewardHours && !ann.time && !ann.note)) return;
+            rewardRows.push([weekKey, cellKey, ann.name, ann.time, ann.rewardHours || 0, ann.note]);
+          });
+        });
+        if (rewardRows.length) {
+          XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+            ['周起始日','单元格','姓名','时间','奖励工时(h)','备注'], ...rewardRows
+          ]), '奖励工时');
+        }
+      } else if (mode === 'revise') {
+        modeLabel = '修订视图';
+        const validWeeks = [];
+        wks.forEach((key, idx)=>{
+          const tplId = weekTemplateMap?.[key];
+          const tpl = templateLibrary.find(t=>t.id===tplId);
+          if (!tpl?.preview?.rawGrid || !tpl?.preview?.cellSlotMap) return;
+          const snapshot = buildRevisionSnapshot(tpl, weekDates(new Date(`${key}T00:00:00`)));
+          const annotationMap = getEffectiveRevisionAnnotations(tpl, key);
+          const ws = buildRawLikeWorksheet(tpl, snapshot?.byKey || {}, annotationMap);
+          if (!ws) return;
+          validWeeks.push(key);
+          const label = weekMap[key].label.replace(/[~]/g, '-');
+          XLSX.utils.book_append_sheet(wb, ws, `修订_${idx+1}_${label}`);
+        });
+        if (!validWeeks.length) {
+          alert('所选时间段对应周未指派可用模板（或模板不含原始视图），无法导出修订视图格式');
+          continue;
+        }
+      } else {
+        continue;
       }
-      const weekKeys = Object.keys(weekMap).sort();
-      if (!weekKeys.length) {
-        alert('所选时间段内没有可导出的周记录');
-        return;
-      }
-      const validWeeks = [];
-      weekKeys.forEach((key, idx)=>{
-        const tplId = weekTemplateMap?.[key];
-        const tpl = templateLibrary.find(t=>t.id===tplId);
-        if (!tpl?.preview?.rawGrid || !tpl?.preview?.cellSlotMap) return;
-        const snapshot = buildRevisionSnapshot(tpl, weekMap[key].dates);
-        const ws = buildRawLikeWorksheet(tpl, snapshot?.byKey || {});
-        if (!ws) return;
-        validWeeks.push(key);
-        const label = weekMap[key].label.replace(/[~]/g, '-');
-        XLSX.utils.book_append_sheet(wb, ws, `修订_${idx+1}_${label}`);
-      });
-      if (!validWeeks.length) {
-        alert('所选时间段对应周未指派可用模板（或模板不含原始视图），无法导出修订视图格式');
-        return;
-      }
-    }
 
-    XLSX.writeFile(wb, `工时统计_${fmt(new Date())}.xlsx`);
+      XLSX.writeFile(wb, exportFileName(allDates, modeLabel));
+    }
   }
 
   function _styleSheet(ws, colCount) {
@@ -856,6 +919,15 @@ function App() {
     setWeekTemplateMap(prev=>{
       const next = {};
       Object.entries(prev || {}).forEach(([k,v])=>{ if (v !== templateId) next[k]=v; });
+      return next;
+    });
+    setWeekCellAnnotations(prev=>{
+      const next = {};
+      Object.entries(prev || {}).forEach(([weekKey, bucket])=>{
+        const weekBucket = {...(bucket || {})};
+        delete weekBucket[templateId];
+        if (Object.keys(weekBucket).length) next[weekKey] = weekBucket;
+      });
       return next;
     });
     if (selectedTemplateId === templateId) setSelectedTemplateId('');
@@ -929,6 +1001,28 @@ function App() {
     if (!selectedTemplate) return;
     const apply = () => {
       assignTemplateToWeek(selectedTemplate.id, currentWeekStart);
+
+      // A revision-view import is used as a review carrier. Its JSON annotations
+      // must become current-week differences before the user replaces this
+      // temporary template with the real layout template. Store them in a
+      // template-independent week bucket so reward/time/note data survives the
+      // subsequent template switch and remains visible in “显示差异”.
+      const importedReviewAnnotations = selectedTemplate?.preview?.cellAnnotations || {};
+      const importedReviewEntries = Object.entries(importedReviewAnnotations)
+        .map(([key,value])=>[key, normalizeRevisionCellAnnotation(value, value?.baseValue || '')])
+        .filter(([,value])=>!!value);
+      if (importedReviewEntries.length) {
+        setWeekCellAnnotations(prev=>{
+          const next = {...(prev || {})};
+          const weekBucket = {...(next[currentWeekStart] || {})};
+          const reviewBucket = {...(weekBucket[WEEK_REVIEW_ANNOTATION_KEY] || {})};
+          importedReviewEntries.forEach(([key,value])=>{ reviewBucket[key] = value; });
+          weekBucket[WEEK_REVIEW_ANNOTATION_KEY] = reviewBucket;
+          next[currentWeekStart] = weekBucket;
+          return next;
+        });
+      }
+
       setRecords(prev => {
         const r = JSON.parse(JSON.stringify(prev));
         const slotEntriesByRelDay = {};
@@ -997,7 +1091,10 @@ function App() {
           }
           if (Object.keys(nextDay).length) r[dateStr] = nextDay;
         };
-        if (view==='week') {
+        // A revision-view import represents a whole-week review carrier.
+        // Always write the full week so review data and the imported schedule stay
+        // on the same week even when the user happened to open the import from day view.
+        if (importedReviewEntries.length || view==='week') {
           wDates.forEach((d,i) => applyDay(fmt(d), i));
         } else {
           const dow = curDate.getDay();
@@ -1012,7 +1109,19 @@ function App() {
         return next;
       });
       setModal(null);
-      showToast(`已写入模板「${selectedTemplate.name}」到${view==='week'?'当前周':'当天'}记录。`, 'success');
+      const importedRewardHours = importedReviewEntries.reduce((sum, [,ann])=>sum + Number(ann.rewardHours || 0), 0);
+      if (importedReviewEntries.length) {
+        // Review-view imports must be visible immediately after “写入模板数据”.
+        // Keep reward/time/note outside normal work-hour records, but surface the
+        // week-scoped review layer in the HTML revision view right away.
+        setView('week');
+        setWeekMode('revise');
+        setShowDiff(true);
+      }
+      const reviewMsg = importedReviewEntries.length
+        ? `；同时写入 ${importedReviewEntries.length} 条复核标注${importedRewardHours>0?`，奖励合计 ${importedRewardHours}h`:''}，已自动打开周修订差异`
+        : '';
+      showToast(`已写入模板「${selectedTemplate.name}」到${importedReviewEntries.length || view==='week'?'当前周':'当天'}记录${reviewMsg}。`, 'success');
     };
     apply();
   }
@@ -1068,7 +1177,7 @@ function App() {
     }
     const targetSet = new Set(targetDates);
     const remainDates = allDates.filter(d=>!targetSet.has(d));
-    const remainWeekKeys = new Set(remainDates.map(d=>fmt(getMonday(new Date(d)))));
+    const remainWeekKeys = new Set(remainDates.map(d=>fmt(getMonday(new Date(`${d}T00:00:00`)))));
     setRecords(prev=>{
       const next = { ...prev };
       targetDates.forEach(d=>{ delete next[d]; });
@@ -1078,6 +1187,13 @@ function App() {
       const next = {};
       Object.entries(prev || {}).forEach(([weekKey, locked])=>{
         if (remainWeekKeys.has(weekKey)) next[weekKey] = locked;
+      });
+      return next;
+    });
+    setWeekCellAnnotations(prev=>{
+      const next = {};
+      Object.entries(prev || {}).forEach(([weekKey, bucket])=>{
+        if (remainWeekKeys.has(weekKey)) next[weekKey] = bucket;
       });
       return next;
     });
@@ -1094,6 +1210,7 @@ function App() {
       setSelectedTemplateId('');
       setWeekTemplateMap({});
       setWeekDayLocks({});
+      setWeekCellAnnotations({});
       localStorage.removeItem('wh_hidden');
       setModal(null);
     });
@@ -1367,7 +1484,10 @@ function App() {
                 records={records}
                 setRecords={setRecords}
                 weekMode={weekMode} setWeekMode={switchWeekMode}
-                weekDayLocked={isCurrentWeekDayLocked}/>
+                weekDayLocked={isCurrentWeekDayLocked}
+                weekStart={currentWeekStart}
+                weekCellAnnotations={weekCellAnnotations}
+                setWeekCellAnnotations={setWeekCellAnnotations}/>
           }
         </div>
       </div>
@@ -1398,7 +1518,7 @@ function App() {
       {/* ── Modals ── */}
       {modal==='types'      && <TypeModal   types={types}   setTypes={setTypes}   close={()=>setModal(null)}/>}
       {modal==='people'     && <PeopleModal personnel={personnel} setPersonnel={setPersonnel} close={()=>setModal(null)}/>}
-      {modal==='export'     && <ExportModal onExport={exportExcel} allDates={Object.keys(records).sort()} close={()=>setModal(null)} personnel={personnel} dayHours={dayHours} weekTemplateMap={weekTemplateMap} templateLibrary={templateLibrary}/>}
+      {modal==='export'     && <ExportModal onExport={exportExcel} allDates={Object.keys(records).sort()} close={()=>setModal(null)} personnel={personnel} dayHours={dayHours} weekTemplateMap={weekTemplateMap} templateLibrary={templateLibrary} weekCellAnnotations={weekCellAnnotations}/>}
       {modal==='clear-records' && <ClearRecordsModal allDates={Object.keys(records).sort()} onConfirm={clearRecordsByRange} close={()=>setModal(null)}/>}
       {modal==='confirm-all'&& <ConfirmModal msg="将清空全部数据：所有工时记录、人员名单（工时类型恢复默认）。此操作不可撤销！" onOk={confirmCb} close={()=>setModal(null)} okLabel="全部清空"/>}
       {modal==='schedule'   && <ScheduleImportModal personnel={personnel} types={types} initialRules={scheduleRules} onSaveRules={setScheduleRules} onSave={tpl=>{ const saved = saveTemplateToLibrary(tpl); setModal(null); showToast(`模板「${saved?.name || ''}」已保存到模板库。`, 'success'); }} close={()=>setModal(null)}/>}
@@ -1785,7 +1905,7 @@ function DayView({ personnel, types, dateStr, getCount, update, dayHours, showDi
 }
 
 /* ═══ Week View ═════════════════════════════════════════════════════════════ */
-function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, showDiff, getTplCount, template, records, setRecords, weekMode, setWeekMode, weekDayLocked }) {
+function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, showDiff, getTplCount, template, records, setRecords, weekMode, setWeekMode, weekDayLocked, weekStart, weekCellAnnotations, setWeekCellAnnotations }) {
   const wTotal = (pid) => wDates.reduce((s,d)=>s+dayHours(fmt(d),pid), 0);
   const colTotal = (d) => personnel.reduce((s,p)=>s+dayHours(fmt(d),p.id), 0);
   const grandTotal = () => wDates.reduce((s,d)=>s+colTotal(d), 0);
@@ -1794,6 +1914,9 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
   const [revisePersonId, setRevisePersonId] = useState('');
   const [reviseZoom, setReviseZoom] = useState(1);
   const [selectedSlotKey, setSelectedSlotKey] = useState('');
+  const [allowFreeCellEdit, setAllowFreeCellEdit] = useState(false);
+  const [annotationEditorKey, setAnnotationEditorKey] = useState('');
+  const [annotationDraft, setAnnotationDraft] = useState({name:'', time:'', rewardHours:'', note:''});
   const reviseTopScrollRef = useRef(null);
   const reviseGridWrapRef = useRef(null);
   const reviseInlineInputRef = useRef(null);
@@ -1831,7 +1954,13 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
     setSelectedSlotKey('');
     setReviseQuery('');
     setRevisePersonId('');
-  },[template]);
+    setAnnotationEditorKey('');
+    setAnnotationDraft({name:'', time:'', rewardHours:'', note:''});
+  },[template, weekStart]);
+
+  useEffect(()=>{
+    if (!allowFreeCellEdit) setAnnotationEditorKey('');
+  },[allowFreeCellEdit]);
 
   useEffect(()=>{
     if (selectedSlotKey && reviseInlineInputRef.current) reviseInlineInputRef.current.focus();
@@ -1844,9 +1973,53 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
     return source.slice(0, 18);
   },[personnel, reviseQuery]);
 
+  const annotationNameCandidates = useMemo(()=>{
+    const q = normStr(annotationDraft.name || '');
+    const source = q ? personnel.filter(p=>matchSearch(p.name, q)) : personnel;
+    return source.slice(0, 12);
+  },[personnel, annotationDraft.name]);
+
   const personIndex = useMemo(()=>Object.fromEntries(personnel.map(p=>[p.name, p])), [personnel]);
   const typeIndexByName = useMemo(()=>Object.fromEntries(types.map(t=>[t.name, t])), [types]);
   const previewMeta = template?.preview || null;
+  const templateId = template?.id || '';
+  const baselineCellAnnotations = previewMeta?.cellAnnotations || {};
+  const weekReviewAnnotations = weekCellAnnotations?.[weekStart]?.[WEEK_REVIEW_ANNOTATION_KEY] || {};
+  const weekAnnotationOverrides = useMemo(
+    ()=>mergeWeekAnnotationOverrides(weekCellAnnotations?.[weekStart] || {}, templateId),
+    [weekCellAnnotations, weekStart, templateId]
+  );
+  const effectiveCellAnnotations = useMemo(()=>{
+    const out = {};
+    Object.entries(baselineCellAnnotations || {}).forEach(([key,value])=>{
+      const ann = normalizeRevisionCellAnnotation(value, value?.baseValue || '');
+      if (ann) out[key] = ann;
+    });
+    Object.entries(weekAnnotationOverrides || {}).forEach(([key,value])=>{
+      if (value?.deleted) delete out[key];
+      else {
+        const ann = normalizeRevisionCellAnnotation(value, value?.baseValue || baselineCellAnnotations?.[key]?.baseValue || '');
+        if (ann) out[key] = ann;
+      }
+    });
+    return out;
+  },[baselineCellAnnotations, weekAnnotationOverrides]);
+  const changedAnnotationKeys = useMemo(()=>{
+    const keys = new Set();
+    Object.entries(weekAnnotationOverrides || {}).forEach(([key,value])=>{
+      const baseline = baselineCellAnnotations?.[key] || null;
+      const importedReview = weekReviewAnnotations?.[key] || null;
+      if (value?.deleted) {
+        // Deleting an imported-review-only item means “dismiss this review item”;
+        // do not keep showing it as a difference when the real template has no
+        // baseline annotation at this cell.
+        if (baseline) keys.add(key);
+        return;
+      }
+      if (importedReview || !revisionAnnotationEquals(value, baseline)) keys.add(key);
+    });
+    return keys;
+  },[weekAnnotationOverrides, weekReviewAnnotations, baselineCellAnnotations]);
   const getSlotAbsKey = useCallback((slot)=>slot?.slotKey || slot?.key || null, []);
   const previewSlotEntries = useMemo(()=>{
     if (!previewMeta?.cellSlotMap) return [];
@@ -2092,6 +2265,76 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
     setRevisePersonId('');
   }
 
+  function getAnnotationBaseValue(key) {
+    const [r,c] = String(key || '').split(',').map(Number);
+    const raw = previewMeta?.rawGrid?.[r]?.[c]?.val || '';
+    const baseline = baselineCellAnnotations?.[key];
+    return baseline?.baseValue != null ? String(baseline.baseValue) : String(raw || '');
+  }
+
+  function updateAnnotationOverride(key, value) {
+    if (!weekStart || !templateId || !setWeekCellAnnotations) return;
+    setWeekCellAnnotations(prev=>{
+      const next = {...(prev || {})};
+      const weekBucket = {...(next[weekStart] || {})};
+      const templateBucket = {...(weekBucket[templateId] || {})};
+      if (value == null) delete templateBucket[key];
+      else templateBucket[key] = value;
+      if (Object.keys(templateBucket).length) weekBucket[templateId] = templateBucket;
+      else delete weekBucket[templateId];
+      if (Object.keys(weekBucket).length) next[weekStart] = weekBucket;
+      else delete next[weekStart];
+      return next;
+    });
+  }
+
+  function openAnnotationEditor(key) {
+    if (!allowFreeCellEdit) return;
+    const current = effectiveCellAnnotations?.[key] || null;
+    setSelectedSlotKey('');
+    setReviseQuery('');
+    setRevisePersonId('');
+    setAnnotationEditorKey(key);
+    setAnnotationDraft({
+      name: current?.name || '',
+      time: current?.time || '',
+      rewardHours: current?.rewardHours ? String(current.rewardHours) : '',
+      note: current?.note || '',
+    });
+  }
+
+  function saveAnnotationEditor() {
+    if (!annotationEditorKey) return;
+    const baseValue = getAnnotationBaseValue(annotationEditorKey);
+    const name = normStr(annotationDraft.name || '');
+    if (!name) {
+      alert('请填写姓名。奖励工时需要绑定到人员；姓名不在人员库时仍可保存，但不会自动计入统计奖励列。');
+      return;
+    }
+    const ann = normalizeRevisionCellAnnotation({
+      ...annotationDraft,
+      name,
+      rewardHours: parseFloat(annotationDraft.rewardHours) || 0,
+      baseValue,
+    }, baseValue);
+    if (!ann) return;
+    const baseline = normalizeRevisionCellAnnotation(baselineCellAnnotations?.[annotationEditorKey], baseValue);
+    if (revisionAnnotationEquals(ann, baseline)) updateAnnotationOverride(annotationEditorKey, null);
+    else updateAnnotationOverride(annotationEditorKey, {...ann, updatedAt:Date.now()});
+    setAnnotationEditorKey('');
+  }
+
+  function clearAnnotationEditor() {
+    if (!annotationEditorKey) return;
+    const baseValue = getAnnotationBaseValue(annotationEditorKey);
+    const baseline = normalizeRevisionCellAnnotation(baselineCellAnnotations?.[annotationEditorKey], baseValue);
+    const importedReview = normalizeRevisionCellAnnotation(weekReviewAnnotations?.[annotationEditorKey], baseValue);
+    if (baseline || importedReview) updateAnnotationOverride(annotationEditorKey, {deleted:true, baseValue, updatedAt:Date.now()});
+    else updateAnnotationOverride(annotationEditorKey, null);
+    setAnnotationEditorKey('');
+    setAnnotationDraft({name:'', time:'', rewardHours:'', note:''});
+  }
+
   if (weekMode === 'revise' && weekDayLocked) {
     return (
       <div className="week-revision-shell">
@@ -2207,29 +2450,46 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
     function getSlotCellView(key, defaultVal) {
       const slot = slotAssignments.byKey[key];
       if (!slot) {
+        const annotation = effectiveCellAnnotations?.[key] || null;
+        const annotationChanged = changedAnnotationKeys.has(key);
+        const isAnnotationSelected = annotationEditorKey === key;
+        let style = {};
         if (previewMeta.cellMatchType?.[key] === 'type') {
           const hitType = types.find(t=>t.name===previewMeta.cellTypeName?.[key]);
-          return {
-            label: defaultVal,
-            style: hitType ? { background:withAlpha(hitType.color,'18'), color:hitType.color, border:`1px solid ${withAlpha(hitType.color,'66')}`, fontWeight:700 } : {},
-            className:'',
-            clickable:false,
-          };
+          style = hitType ? { background:withAlpha(hitType.color,'18'), color:hitType.color, border:`1px solid ${withAlpha(hitType.color,'66')}`, fontWeight:700 } : {};
+        } else if (previewMeta.cellMatchType?.[key] === 'unmatched') {
+          style = {background:'var(--yellow)18', color:'var(--yellow)', border:'1px solid var(--yellow)'};
+        } else if (HEADER_KW_VALS.has(defaultVal)) {
+          style = {background:'var(--surface2)', color:'var(--muted)', fontStyle:'italic'};
         }
-        if (previewMeta.cellMatchType?.[key] === 'unmatched') {
-          return { label:defaultVal, style:{background:'var(--yellow)18', color:'var(--yellow)', border:'1px solid var(--yellow)'}, className:'', clickable:false };
+        if (showDiff && annotationChanged) {
+          style = {...style, background:'rgba(210,153,34,.14)', border:'1px solid var(--yellow)', color:'var(--text)', fontStyle:'normal', fontWeight:700};
         }
-        if (HEADER_KW_VALS.has(defaultVal)) {
-          return { label:defaultVal, style:{background:'var(--surface2)', color:'var(--muted)', fontStyle:'italic'}, className:'', clickable:false };
-        }
-        return { label:defaultVal, style:{}, className:'', clickable:false };
+        const annotationVisible = showDiff && annotationChanged && annotation;
+        const label = annotationVisible ? annotation.name : defaultVal;
+        const className = `week-revision-grid-cell${showDiff && annotationChanged?' changed':''}${isAnnotationSelected?' selected':''}`;
+        const hint = annotationVisible
+          ? `修订标注：${annotation.name}${annotation.time?` · ${annotation.time}`:''}${annotation.rewardHours?` · 奖励${annotation.rewardHours}h`:''}${annotation.note?` · ${annotation.note}`:''}`
+          : (allowFreeCellEdit ? '非人员位置编辑已开启：点击填写姓名、时间、奖励工时和备注' : '开启“编辑非人员位置”后可添加修订标注');
+        return {
+          label,
+          style,
+          className,
+          clickable:allowFreeCellEdit,
+          annotation,
+          annotationVisible,
+          annotationChanged,
+          isAnnotationSelected,
+          hint,
+          cellKey:key,
+        };
       }
       const hitType = typeIndexByName[slot.typeName];
       const isSelected = selectedSlotKey === key;
       const displayName = slot.currentPerson || '';
       const isChanged = slot.state === 'changed';
       const isRemoved = slot.state === 'removed';
-        const className = `week-revision-grid-cell${isRemoved?' removed':''}${showDiff && isChanged?' changed':''}${showDiff && isRemoved?' removed-diff':''}${isSelected?' selected':''}`;
+      const className = `week-revision-grid-cell${isRemoved?' removed':''}${showDiff && isChanged?' changed':''}${showDiff && isRemoved?' removed-diff':''}${isSelected?' selected':''}`;
       const style = hitType ? {
         background: slot.currentPerson ? withAlpha(hitType.color,'22') : 'rgba(248,81,73,.08)',
         color: slot.currentPerson ? hitType.color : 'var(--red)',
@@ -2240,7 +2500,7 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
       if (isSelected) hint = '再次点击：恢复模板原数据';
       else if (slot.currentPerson) hint = `点击清空「${slot.currentPerson}」`;
       else hint = '点击选中此槽位，直接在当前位置搜索替补人员';
-      return { label:displayName, style, className, clickable:true, slot, hint, isSelected };
+      return { label:displayName, style, className, clickable:true, slot, hint, isSelected, cellKey:key };
     }
 
     return (
@@ -2257,7 +2517,13 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
             <button className="btn btn-sm" onClick={()=>setReviseZoom(1)}>重置</button>
             <button className="btn btn-sm" onClick={()=>goDay(wDates[activeDay])}>切到按天</button>
             <button className="btn btn-sm" onClick={()=>setWeekMode('stats')}>回到周统计</button>
+            <button className={`btn btn-sm${allowFreeCellEdit?' btn-primary':''}`} onClick={()=>setAllowFreeCellEdit(v=>!v)}>
+              {allowFreeCellEdit ? '✓ 非人员位置可编辑' : '编辑非人员位置'}
+            </button>
             <span className={`flow-badge ${showDiff ? 'active' : 'todo'}`}>{showDiff ? '差异已显示' : '可打开差异'}</span>
+          </div>
+          <div style={{fontSize:'11px',color:'var(--muted)',margin:'6px 0 8px'}}>
+            开启“编辑非人员位置”后，可点击任意非人员单元格填写姓名、时间、奖励工时和备注；本周新增/修改标注按差异处理，只有开启“显示差异”时才在表格中显示“姓名 + 右下角奖励工时”。
           </div>
           <div
             className="raw-grid-scroll-top"
@@ -2309,10 +2575,68 @@ function WeekView({ personnel, types, wDates, dayHours, setCurDate, setView, sho
                           className={viewInfo.className + (isActiveDay ? ' active-day' : '')}
                           style={viewInfo.style}
                           title={viewInfo.hint || (viewInfo.slot ? `${WD[viewInfo.slot.weekday]} · ${viewInfo.slot.typeName} · ${Number.isFinite(viewInfo.slot.hours)?viewInfo.slot.hours.toFixed(2)+'h · ':''}${viewInfo.slot.hoursReason || ''} · 模板人员：${viewInfo.slot.baselinePerson || '空槽位'}` : val)}
-                          onClick={viewInfo.clickable ? ()=>handleRevisionSlotClick(viewInfo.slot) : undefined}
+                          onClick={viewInfo.slot
+                            ? ()=>handleRevisionSlotClick(viewInfo.slot)
+                            : (viewInfo.clickable ? ()=>openAnnotationEditor(key) : undefined)}
                         >
-                          <div className="week-slot-cell-inner">
+                          <div className="week-slot-cell-inner" style={{position:'relative',minHeight:'24px'}}>
                             {viewInfo.label}
+                            {viewInfo.annotationVisible && Number(viewInfo.annotation?.rewardHours || 0) > 0 && (
+                              <span style={{position:'absolute',right:'3px',bottom:'1px',fontSize:'9px',lineHeight:1,color:'var(--yellow)',fontWeight:700}}>
+                                {Number(viewInfo.annotation.rewardHours).toFixed(1)}h
+                              </span>
+                            )}
+                            {viewInfo.isAnnotationSelected && (
+                              <div className="week-slot-editor" onMouseDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()} style={{minWidth:'330px'}}>
+                                <div className="week-slot-editor-head">
+                                  <strong>修订标注 · {viewInfo.cellKey}</strong>
+                                  <span>底层内容：{getAnnotationBaseValue(viewInfo.cellKey) || '空白单元格'}</span>
+                                </div>
+                                <input
+                                  className="inp"
+                                  value={annotationDraft.name}
+                                  placeholder="姓名（建议使用在册人员）"
+                                  onChange={e=>setAnnotationDraft(d=>({...d,name:e.target.value}))}
+                                />
+                                <div className="week-slot-editor-suggestions">
+                                  {annotationNameCandidates.map(p=>(
+                                    <button type="button" key={p.id} className="week-slot-editor-chip" onClick={()=>setAnnotationDraft(d=>({...d,name:p.name}))}>{p.name}</button>
+                                  ))}
+                                  {!annotationNameCandidates.length && <span className="week-slot-editor-empty">没有匹配人员，可继续手工输入</span>}
+                                </div>
+                                <div style={{display:'grid',gridTemplateColumns:'1fr 120px',gap:'6px'}}>
+                                  <input
+                                    className="inp"
+                                    value={annotationDraft.time}
+                                    placeholder="时间，如 19:00-21:00"
+                                    onChange={e=>setAnnotationDraft(d=>({...d,time:e.target.value}))}
+                                  />
+                                  <input
+                                    className="inp"
+                                    type="number" min="0" step="0.5"
+                                    value={annotationDraft.rewardHours}
+                                    placeholder="奖励工时"
+                                    onChange={e=>setAnnotationDraft(d=>({...d,rewardHours:e.target.value}))}
+                                  />
+                                </div>
+                                <textarea
+                                  className="inp"
+                                  rows="2"
+                                  value={annotationDraft.note}
+                                  placeholder="备注"
+                                  onChange={e=>setAnnotationDraft(d=>({...d,note:e.target.value}))}
+                                  style={{resize:'vertical'}}
+                                />
+                                <div style={{fontSize:'10px',color:'var(--muted)'}}>
+                                  保存后按本周差异记录；姓名能匹配人员库时，奖励工时会自动加入导出统计。HTML 视图仅在“显示差异”开启时显示姓名和右下角奖励工时。
+                                </div>
+                                <div className="week-slot-editor-actions">
+                                  <button className="btn btn-sm" onClick={()=>setAnnotationEditorKey('')}>取消</button>
+                                  {(effectiveCellAnnotations?.[viewInfo.cellKey] || baselineCellAnnotations?.[viewInfo.cellKey]) && <button className="btn btn-sm btn-danger" onClick={clearAnnotationEditor}>清除标注</button>}
+                                  <button className="btn btn-sm btn-primary" onClick={saveAnnotationEditor}>保存</button>
+                                </div>
+                              </div>
+                            )}
                             {viewInfo.isSelected && (
                               <div className="week-slot-editor" onMouseDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
                                 <div className="week-slot-editor-head">
@@ -2695,7 +3019,7 @@ function BatchHoursModal({ records, setRecords, personnel, types, parserRules, c
           </table>
         </div>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:10,fontSize:'11px',color:'var(--muted)'}}>
-          <span>理论规则：洗抹布/值日 1h；值班按时段；晚巡 1h；周日晚巡及负责人双倍；负责人跨区域合并计时。</span>
+          <span>理论规则：洗抹布/值日 1h；值班按时段；晚巡统一 1h；负责人跨区域合并计时，周日负责人仍按 2h 总额。</span>
           <button className="btn btn-primary" onClick={close}>完成</button>
         </div>
       </div>
@@ -2826,22 +3150,37 @@ function PeopleModal({ personnel, setPersonnel, close }) {
 }
 
 /* ═══ Export Modal ══════════════════════════════════════════════════════════ */
-function ExportModal({ onExport, allDates, close, personnel, dayHours, weekTemplateMap, templateLibrary }) {
-  const [sel, setSel]       = useState('both');
+function ExportModal({ onExport, allDates, close, personnel, dayHours, weekTemplateMap, templateLibrary, weekCellAnnotations }) {
+  const [selectedModes, setSelectedModes] = useState(['day','week','detail']);
   const [previewMode, setPreviewMode] = useState('day');
-  const [rangeType, setRangeType] = useState('all'); // 'all' | 'custom'
+  const [rangeType, setRangeType] = useState('month'); // 'month' | 'all' | 'custom'
   const minDate = allDates[0] || '';
   const maxDate = allDates[allDates.length-1] || '';
-  const [startDate, setStartDate] = useState(minDate);
+  const recentMonthStart = useMemo(()=>{
+    if (!maxDate) return '';
+    return fmt(addDays(new Date(`${maxDate}T00:00:00`), -30));
+  },[maxDate]);
+  const [startDate, setStartDate] = useState(recentMonthStart || minDate);
   const [endDate,   setEndDate]   = useState(maxDate);
   const [bonusHours, setBonusHours] = useState({});
 
-  const filtered = rangeType==='all' ? allDates
-    : allDates.filter(d=>d>=startDate && d<=endDate);
+  useEffect(()=>{
+    if (rangeType === 'month') {
+      setStartDate(recentMonthStart || minDate);
+      setEndDate(maxDate);
+    }
+  },[rangeType, recentMonthStart, minDate, maxDate]);
+
+  const filtered = rangeType==='all'
+    ? allDates
+    : rangeType==='month'
+      ? allDates.filter(d=>d>=recentMonthStart && d<=maxDate)
+      : allDates.filter(d=>d>=startDate && d<=endDate);
+
   const weekMap = useMemo(()=>{
     const map = {};
     for (const d of filtered) {
-      const mon = getMonday(new Date(d));
+      const mon = getMonday(new Date(`${d}T00:00:00`));
       const key = fmt(mon);
       const sun = addDays(mon, 6);
       if (!map[key]) map[key] = { label:`${fmtMid(mon)}~${fmtMid(sun)}`, dates:[] };
@@ -2860,15 +3199,43 @@ function ExportModal({ onExport, allDates, close, personnel, dayHours, weekTempl
     });
   },[weekKeys, weekTemplateMap, templateLibrary]);
 
-  function go() {
-    onExport(sel, rangeType==='all'?null:startDate, rangeType==='all'?null:endDate, bonusHours);
-    close();
+  useEffect(()=>{
+    if (!canReviseExport && selectedModes.includes('revise')) {
+      setSelectedModes(prev=>prev.filter(v=>v!=='revise'));
+      if (previewMode === 'revise') setPreviewMode('day');
+    }
+  },[canReviseExport]);
+
+  const autoBonusByPid = useMemo(()=>{
+    const out = Object.fromEntries((personnel || []).map(p=>[p.id, 0]));
+    const pidByName = Object.fromEntries((personnel || []).map(p=>[p.name, p.id]));
+    weekKeys.forEach(weekKey=>{
+      const templateId = weekTemplateMap?.[weekKey];
+      if (!templateId) return;
+      const overrides = mergeWeekAnnotationOverrides(weekCellAnnotations?.[weekKey] || {}, templateId);
+      Object.values(overrides).forEach(value=>{
+        if (!value || value.deleted) return;
+        const ann = normalizeRevisionCellAnnotation(value, value.baseValue || '');
+        if (!ann?.name || !ann.rewardHours) return;
+        const pid = pidByName[ann.name];
+        if (pid) out[pid] = (out[pid] || 0) + ann.rewardHours;
+      });
+    });
+    return out;
+  },[personnel, weekKeys, weekTemplateMap, weekCellAnnotations]);
+
+  function toggleMode(mode) {
+    setSelectedModes(prev=>prev.includes(mode) ? prev.filter(v=>v!==mode) : [...prev, mode]);
   }
 
-  useEffect(()=>{
-    if (sel === 'revise') setPreviewMode('revise');
-    else if (previewMode === 'revise') setPreviewMode('day');
-  },[sel]);
+  function go() {
+    if (!selectedModes.length) { alert('请至少选择一种导出内容'); return; }
+    if (!filtered.length) { alert('所选范围内无记录'); return; }
+    const rangeStart = rangeType==='all' ? null : (rangeType==='month' ? recentMonthStart : startDate);
+    const rangeEnd = rangeType==='all' ? null : (rangeType==='month' ? maxDate : endDate);
+    onExport(selectedModes, rangeStart, rangeEnd, bonusHours);
+    close();
+  }
 
   const dateInputStyle = {
     padding:'5px 8px',borderRadius:'var(--radius)',border:'1px solid var(--border)',
@@ -2889,7 +3256,7 @@ function ExportModal({ onExport, allDates, close, personnel, dayHours, weekTempl
           ) : weekKeys.length ? (
             <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
               <div style={{fontSize:'12px',color:'var(--muted)'}}>
-                将按模板原始布局导出，每个自然周生成一个工作表，人员位置尽量与修订模式一致。
+                每个自然周生成一个工作表。非人员位置的修订标注会作为带版本标记的 JSON 字符串写入对应 Excel 单元格；再次“排班转模板”时会恢复原单元格内容并识别标注元数据。
               </div>
               {weekKeys.map((k, idx)=>(
                 <div key={k} className="rule-chip">
@@ -2923,19 +3290,23 @@ function ExportModal({ onExport, allDates, close, personnel, dayHours, weekTempl
             {personnel.map(p=>{
               const values = cols.map(col=>col.getValue(p.id));
               const total = values.reduce((s,v)=>s+v,0);
-              const bonus = parseFloat(bonusHours[p.id]) || 0;
+              const autoBonus = autoBonusByPid[p.id] || 0;
+              const manualBonus = parseFloat(bonusHours[p.id]) || 0;
+              const bonus = autoBonus + manualBonus;
               return (
                 <tr key={p.id}>
                   <td className="col-name" style={{position:'sticky',left:0,zIndex:1}}>{p.name}</td>
                   {values.map((v, idx)=><td key={idx}>{v ? v.toFixed(1) : '—'}</td>)}
                   <td>
+                    {autoBonus > 0 && <div style={{fontSize:'10px',color:'var(--green)',marginBottom:3}}>周修订 +{autoBonus.toFixed(1)}h</div>}
                     <input
                       className="inp inp-sm"
                       type="number"
                       step="0.5"
                       min="0"
                       value={bonusHours[p.id] ?? ''}
-                      placeholder="0"
+                      placeholder={autoBonus ? '额外 +0' : '0'}
+                      title="本次导出的额外奖励工时；周修订标注中的奖励工时会自动计入"
                       onChange={e=>setBonus(p.id, e.target.value)}
                     />
                   </td>
@@ -2949,44 +3320,55 @@ function ExportModal({ onExport, allDates, close, personnel, dayHours, weekTempl
     );
   }
 
+  const modeOptions = [
+    {v:'day', label:'按日统计', desc:'单独导出按日统计文件'},
+    {v:'week', label:'按周汇总', desc:'单独导出按周汇总文件'},
+    {v:'detail', label:'工时明细', desc:'单独导出可再次导入的明细；如有周修订奖励，附带“奖励工时”sheet'},
+    {v:'revise', label:'修订视图', desc:'按模板原始布局导出，每周一个 sheet', disabled:!canReviseExport},
+  ];
+  const rangeFirst = filtered[0] || '';
+  const rangeLast = filtered[filtered.length-1] || '';
+  const fileModeLabel = {day:'按日统计',week:'按周汇总',detail:'工时明细',revise:'修订视图'};
+  const nameDate = d=>String(d||'').replace(/-/g,'.');
+
   return (
     <div className="overlay" onClick={e=>e.target===e.currentTarget&&close()}>
-      <div className="modal" style={{width:'min(1120px, 94vw)'}}>
+      <div className="modal" style={{width:'min(1120px, 94vw)',maxHeight:'92vh',overflowY:'auto'}}>
         <div className="modal-title">📊 导出 Excel <button className="close" onClick={close}>✕</button></div>
 
-        {/* Content type */}
         <div className="field">
-          <label>导出内容</label>
-          {[
-            {v:'day',   label:'按日统计',       desc:'每列=一天'},
-            {v:'week',  label:'按周汇总',       desc:'每列=一周'},
-            {v:'both',  label:'日 + 周（推荐）', desc:'含两种统计 + 明细'},
-            {v:'revise',label:'修订视图格式',   desc:'按模板原始布局导出，每周一个 sheet', disabled:!canReviseExport},
-          ].map(opt=>(
-            <label key={opt.v} style={{display:'flex',alignItems:'center',gap:'8px',
-              padding:'7px 10px',borderRadius:6,cursor:'pointer',
-              background:sel===opt.v?'var(--accent)22':'transparent',
-              border:`1px solid ${sel===opt.v?'var(--accent)':'var(--border)'}`,
-              marginBottom:'6px',fontSize:'13px',opacity:opt.disabled ? 0.6 : 1,
-              cursor:opt.disabled ? 'not-allowed' : 'pointer'}}>
-              <input type="radio" value={opt.v} checked={sel===opt.v} onChange={()=>setSel(opt.v)} disabled={opt.disabled}/>
-              <div>
-                <div style={{fontWeight:600,color:sel===opt.v?'var(--accent)':'var(--text)'}}>{opt.label}</div>
-                <div style={{fontSize:'11px',color:'var(--muted)'}}>{opt.desc}</div>
-              </div>
-            </label>
-          ))}
+          <label>导出内容（可多选；每项分别生成一个文件）</label>
+          {modeOptions.map(opt=>{
+            const checked = selectedModes.includes(opt.v);
+            return (
+              <label key={opt.v} style={{display:'flex',alignItems:'center',gap:'8px',
+                padding:'7px 10px',borderRadius:6,
+                background:checked?'var(--accent)22':'transparent',
+                border:`1px solid ${checked?'var(--accent)':'var(--border)'}`,
+                marginBottom:'6px',fontSize:'13px',opacity:opt.disabled ? 0.6 : 1,
+                cursor:opt.disabled ? 'not-allowed' : 'pointer'}}>
+                <input type="checkbox" value={opt.v} checked={checked} onChange={()=>toggleMode(opt.v)} disabled={opt.disabled}/>
+                <div>
+                  <div style={{fontWeight:600,color:checked?'var(--accent)':'var(--text)'}}>{opt.label}</div>
+                  <div style={{fontSize:'11px',color:'var(--muted)'}}>{opt.desc}</div>
+                </div>
+              </label>
+            );
+          })}
         </div>
 
         <hr className="divider"/>
 
-        {/* Date range */}
         <div className="field">
           <label>时间范围</label>
-          <div className="radio-row" style={{marginBottom:'10px'}}>
+          <div className="radio-row" style={{marginBottom:'10px',flexWrap:'wrap'}}>
+            <label><input type="radio" checked={rangeType==='month'} onChange={()=>setRangeType('month')}/> 最近一个月（默认）</label>
             <label><input type="radio" checked={rangeType==='all'} onChange={()=>setRangeType('all')}/> 全部记录（{allDates.length} 天）</label>
             <label><input type="radio" checked={rangeType==='custom'} onChange={()=>setRangeType('custom')}/> 自定义范围</label>
           </div>
+          {rangeType==='month' && (
+            <div style={{fontSize:'11px',color:'var(--muted)'}}>按最近记录日期向前 30 天筛选；实际有记录范围：{rangeFirst || '—'} 至 {rangeLast || '—'}（{filtered.length} 天）。</div>
+          )}
           {rangeType==='custom' && (
             <div style={{display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap'}}>
               <input type="date" value={startDate} min={minDate} max={endDate||maxDate}
@@ -2997,16 +3379,24 @@ function ExportModal({ onExport, allDates, close, personnel, dayHours, weekTempl
               <span style={{fontSize:'11px',color:'var(--muted)'}}>共 {filtered.length} 天</span>
             </div>
           )}
-          {rangeType==='custom' && filtered.length===0 && (
+          {filtered.length===0 && (
             <div style={{fontSize:'11px',color:'var(--red)',marginTop:'5px'}}>⚠ 所选范围内无记录</div>
           )}
         </div>
 
         <div style={{fontSize:'11px',color:'var(--muted)',marginBottom:'14px'}}>
-          {sel==='revise'
-            ? '修订视图格式会保留模板原始布局，并按当前工时记录回填到对应槽位。'
-            : '导出前可先在预览里补奖励工时。奖励工时会出现在按天 / 按周统计表的总计前一列。'}
+          周修订中的奖励工时会自动加入按日/按周导出的“奖励工时”列；这里仍保留“本次额外奖励”输入，用于尚未写入周修订标注的临时奖励。
         </div>
+
+        {!!selectedModes.length && !!filtered.length && (
+          <div className="rule-block" style={{marginBottom:'14px'}}>
+            <div className="rule-block-title"><strong>将生成的文件</strong></div>
+            <div style={{display:'flex',flexDirection:'column',gap:5,fontSize:'11px',color:'var(--muted)'}}>
+              {selectedModes.map(mode=><code key={mode}>工时统计_{nameDate(rangeFirst)}-{nameDate(rangeLast)}_{fileModeLabel[mode]}.xlsx</code>)}
+            </div>
+          </div>
+        )}
+
         <div className="rule-block" style={{marginBottom:'14px'}}>
           <div className="rule-block-title">
             <strong>导出预览</strong>
@@ -3018,14 +3408,14 @@ function ExportModal({ onExport, allDates, close, personnel, dayHours, weekTempl
           </div>
           <div style={{fontSize:'11px',color:'var(--muted)'}}>
             {previewMode==='revise'
-              ? '修订视图预览展示将生成哪些按周工作表，以及它们会按模板原始布局导出。'
-              : '当前预览会按所选时间范围展示每列工时，奖励工时可单独录入，不会写回日常记录，只影响本次导出。'}
+              ? '修订视图预览展示将生成哪些按周工作表；JSON 标注会写回相应单元格。'
+              : '奖励工时 = 周修订标注自动奖励 + 本次额外奖励；自动奖励不要求确定到具体日期。'}
           </div>
           {renderPreviewTable(previewMode)}
         </div>
         <div style={{display:'flex',justifyContent:'flex-end',gap:'8px'}}>
           <button className="btn" onClick={close}>取消</button>
-          <button className="btn btn-primary" disabled={(rangeType==='custom'&&filtered.length===0) || (sel==='revise' && !canReviseExport)} onClick={go}>导出</button>
+          <button className="btn btn-primary" disabled={!filtered.length || !selectedModes.length || (selectedModes.includes('revise') && !canReviseExport)} onClick={go}>分别导出 {selectedModes.length || 0} 项</button>
         </div>
       </div>
     </div>
@@ -3327,6 +3717,7 @@ function PreviewTabs({ parseResult, personnel, types, WD_LABELS, initialTab='sum
   const [zoom, setZoom] = useState(1);
   const cellMatchType = parseResult.cellMatchType || {};
   const cellTypeName = parseResult.cellTypeName || {};
+  const revisionAnnotations = parseResult.revisionAnnotations || {};
   const rawWrapRef = useRef(null);
   const rawTopScrollRef = useRef(null);
   const [rawWrapWidth, setRawWrapWidth] = useState(0);
@@ -3357,6 +3748,7 @@ function PreviewTabs({ parseResult, personnel, types, WD_LABELS, initialTab='sum
     unmatched: {bg:'var(--yellow)22', color:'var(--yellow)', border:'var(--yellow)66', label:'未匹配人员'},
     'leader-candidate': {bg:'var(--yellow)26', color:'var(--yellow)', border:'var(--yellow)88', label:'待确认负责人候选'},
     type:      {bg:'var(--accent)22', color:'var(--accent)', border:'var(--accent)55', label:'工时类型'},
+    'revision-meta': {bg:'var(--yellow)16', color:'var(--yellow)', border:'var(--yellow)88', label:'修订 JSON 标注'},
   };
 
   function excelColName(idx) {
@@ -3407,6 +3799,9 @@ function PreviewTabs({ parseResult, personnel, types, WD_LABELS, initialTab='sum
 
     function cellStyle(r, cc) {
       const key = `${r},${cc}`;
+      if (revisionAnnotations[key]) {
+        return {background:'var(--yellow)16',color:'var(--text)',border:'1px solid var(--yellow)',fontWeight:700,boxShadow:'inset 0 0 0 1px var(--yellow)44'};
+      }
       const mt = cellMatchType[key];
       if (mt === 'matched') {
         const typeName = cellTypeName[key];
@@ -3515,8 +3910,12 @@ function PreviewTabs({ parseResult, personnel, types, WD_LABELS, initialTab='sum
                   if (!val && !mergeStarts[`${row.r},${cc}`]) return <td key={cc} title="" />;
                   const st = cellStyle(row.r, cc);
                   const span = mergeStarts[`${row.r},${cc}`];
+                  const ann = revisionAnnotations[`${row.r},${cc}`];
+                  const title = ann
+                    ? `已识别修订 JSON：${ann.name || ''}${ann.time?` · ${ann.time}`:''}${ann.rewardHours?` · 奖励${ann.rewardHours}h`:''}${ann.note?` · ${ann.note}`:''} · 原内容：${ann.baseValue || ''}`
+                    : (val || '');
                   return (
-                    <td key={cc} style={st} title={val||''} rowSpan={span?.rowSpan} colSpan={span?.colSpan}>
+                    <td key={cc} style={st} title={title} rowSpan={span?.rowSpan} colSpan={span?.colSpan}>
                       {val || ''}
                     </td>
                   );
@@ -3833,6 +4232,12 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
   const unconfirmedLeaderCandidates = leaderCandidates.filter(item=>item.matched && !item.selected);
   const pairedLeaderCandidates = leaderCandidates.filter(item=>item.paired && item.matched);
   const explicitLeaderCount = Object.values(parseResult?.cellSlotMap || {}).filter(slot=>slot?.role==='leader' && slot?.leaderSource==='explicit_label').length;
+  const revisionAnnotationCount = Object.keys(parseResult?.revisionAnnotations || {}).length;
+  const revisionRewardAnnotations = Object.values(parseResult?.revisionAnnotations || {})
+    .map(value=>normalizeRevisionCellAnnotation(value, value?.baseValue || ''))
+    .filter(ann=>ann && ann.rewardHours > 0);
+  const revisionRewardCount = revisionRewardAnnotations.length;
+  const revisionRewardHours = revisionRewardAnnotations.reduce((sum, ann)=>sum + ann.rewardHours, 0);
   const typeKeywordPlaceholder = modalRules.typeRules.length
     ? `例如：${modalRules.typeRules[0].keyword} → ${modalRules.typeRules[0].typeName}`
     : types.length
@@ -3881,6 +4286,7 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
         cellMatchType: parseResult.cellMatchType,
         cellTypeName: parseResult.cellTypeName,
         cellSlotMap: parseResult.cellSlotMap,
+        cellAnnotations: parseResult.revisionAnnotations || {},
       } : null,
     });
   }
@@ -4042,7 +4448,7 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
             <div className="rule-block">
               <div className="rule-block-title"><strong>工时规则</strong><span style={{fontSize:'11px',color:'var(--muted)'}}>关键词命中后写入实际工时；周日可单独加倍</span></div>
               <div style={{fontSize:'12px',color:'var(--muted)',marginBottom:'8px',lineHeight:1.7}}>
-                未命中固定规则的时间段仍按起止时间自动计算。默认规则：洗抹布/值日 1h；晚巡 1h、周日 ×2；负责人两个区域合计 1h、周日合计 2h。
+                未命中固定规则的时间段仍按起止时间自动计算。默认规则：洗抹布/值日 1h；普通晚巡统一 1h（周日不再自动 ×2）；负责人两个区域合计 1h、周日合计 2h。
               </div>
               <div style={{display:'grid',gridTemplateColumns:'minmax(180px,1fr) 120px 140px auto',gap:8,marginBottom:8}}>
                 <input className="inp" placeholder="关键词，如：临时巡查" value={hourKeyword} onChange={e=>setHourKeyword(e.target.value)}/>
@@ -4129,6 +4535,13 @@ function ScheduleImportModal({ personnel, types, initialRules, onSaveRules, onSa
               )}
               {unconfirmedLeaderCandidates.length>0 && (
                 <span style={{color:'var(--yellow)'}}>⚠ {unconfirmedLeaderCandidates.length} 个负责人候选未确认，不会计入模板</span>
+              )}
+              {revisionAnnotationCount>0 && (
+                <span style={{color:'var(--yellow)'}}>
+                  ✓ 已识别 {revisionAnnotationCount} 个修订 JSON 标注
+                  {revisionRewardCount>0 ? ` · 其中奖励 ${revisionRewardCount} 条 / ${revisionRewardHours.toFixed(1)}h` : ''}
+                  ，原单元格内容已恢复参与解析
+                </span>
               )}
               <span style={{fontSize:'11px',color:'var(--muted)',marginLeft:'auto'}}>
                 💡 这里先把周模板校准干净；保存后先指派当前周模板，必要时再写入模板数据，最后回按天核对差异

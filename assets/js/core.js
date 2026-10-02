@@ -56,7 +56,7 @@ function loadLS(key, def) {
 
 const DEFAULT_HOUR_RULES = [
   {id:'hr_leader', keyword:'负责人', hours:1, sundayMultiplier:2, kind:'leader'},
-  {id:'hr_night_patrol', keyword:'晚巡', hours:1, sundayMultiplier:2, kind:'night_patrol'},
+  {id:'hr_night_patrol', keyword:'晚巡', hours:1, sundayMultiplier:1, kind:'night_patrol'},
   {id:'hr_evening_duty', keyword:'晚上值日', hours:1, sundayMultiplier:1, kind:'duty'},
   {id:'hr_duty', keyword:'值日', hours:1, sundayMultiplier:1, kind:'duty'},
   {id:'hr_wash', keyword:'洗', hours:1, sundayMultiplier:1, kind:'wash'},
@@ -80,7 +80,10 @@ function normalizeScheduleRules(input) {
     ? mapArr(input.hourRules, r => {
         const keyword = normStr(r?.keyword || '');
         const hours = parseFloat(r?.hours);
-        const sundayMultiplier = parseFloat(r?.sundayMultiplier);
+        let sundayMultiplier = parseFloat(r?.sundayMultiplier);
+        // Migrate the retired built-in rule: ordinary Sunday night patrol is no longer doubled.
+        // Only the legacy built-in rule ID is migrated; user-created custom rules remain untouched.
+        if (r?.id === 'hr_night_patrol' && keyword === '晚巡' && hours === 1 && sundayMultiplier === 2) sundayMultiplier = 1;
         if (!keyword || !Number.isFinite(hours) || hours < 0) return null;
         return {
           id:r?.id || uid(),
@@ -127,6 +130,82 @@ function normStr(s) {
   return String(s).replace(/：/g,':').replace(/[－—\u2014\u2013]/g,'-').replace(/\s+/g,' ').trim();
 }
 
+/* ═══ Revision-cell JSON helpers ═══════════════════════════════════════════ */
+const REVISION_CELL_MARKER = '__wh_revision_cell__';
+const REVISION_CELL_VERSION = 1;
+// Imported revision-view annotations are week-scoped review data, not template baseline.
+// Keeping them in a template-independent bucket allows the user to replace the
+// temporary revision-view template with the real layout template without losing
+// pending reward/time/note differences.
+const WEEK_REVIEW_ANNOTATION_KEY = '__review_import__';
+
+function mergeWeekAnnotationOverrides(weekBucket, templateId) {
+  const review = weekBucket?.[WEEK_REVIEW_ANNOTATION_KEY] || {};
+  const templateOverrides = templateId ? (weekBucket?.[templateId] || {}) : {};
+  return { ...review, ...templateOverrides };
+}
+
+function normalizeRevisionCellAnnotation(value, fallbackBaseValue = '') {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.deleted) return null;
+  const name = normStr(value.name || '');
+  const time = normStr(value.time || '');
+  const note = value.note == null ? '' : String(value.note).trim();
+  const parsedReward = typeof value.rewardHours === 'number' ? value.rewardHours : parseFloat(value.rewardHours);
+  const rewardHours = Number.isFinite(parsedReward) && parsedReward > 0 ? parsedReward : 0;
+  const baseValue = value.baseValue != null ? String(value.baseValue) : String(fallbackBaseValue || '');
+  if (!name && !time && !rewardHours && !note) return null;
+  return {
+    name,
+    time,
+    rewardHours,
+    note,
+    baseValue,
+    updatedAt: Number.isFinite(value.updatedAt) ? value.updatedAt : null,
+  };
+}
+
+function revisionAnnotationEquals(a, b) {
+  const aa = normalizeRevisionCellAnnotation(a, a?.baseValue || '');
+  const bb = normalizeRevisionCellAnnotation(b, b?.baseValue || '');
+  if (!aa || !bb) return !aa && !bb;
+  return aa.name === bb.name &&
+    aa.time === bb.time &&
+    Number(aa.rewardHours || 0) === Number(bb.rewardHours || 0) &&
+    aa.note === bb.note &&
+    String(aa.baseValue || '') === String(bb.baseValue || '');
+}
+
+function serializeRevisionCellPayload(value, baseValue = '') {
+  const ann = normalizeRevisionCellAnnotation(value, baseValue);
+  if (!ann) return String(baseValue || '');
+  return JSON.stringify({
+    [REVISION_CELL_MARKER]: REVISION_CELL_VERSION,
+    baseValue: String(baseValue != null ? baseValue : ann.baseValue || ''),
+    name: ann.name,
+    time: ann.time,
+    rewardHours: Number(ann.rewardHours || 0),
+    note: ann.note,
+  });
+}
+
+function parseRevisionCellPayload(rawValue) {
+  if (rawValue == null) return null;
+  let obj = rawValue;
+  if (typeof obj === 'string') {
+    const text = obj.trim();
+    if (!text || text[0] !== '{') return null;
+    try { obj = JSON.parse(text); } catch { return null; }
+  }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+  if (Number(obj[REVISION_CELL_MARKER]) !== REVISION_CELL_VERSION) return null;
+  return normalizeRevisionCellAnnotation(obj, obj.baseValue || '');
+}
+
+function revisionCellBaseValue(rawValue) {
+  const ann = parseRevisionCellPayload(rawValue);
+  return ann ? ann.baseValue : rawValue;
+}
+
 function parseTimeMins(label) {
   const s = normStr(label);
   const m = s.match(/(\d{1,2}):(\d{2})\s*[-~]\s*(\d{1,2}):(\d{2})/);
@@ -165,11 +244,11 @@ function inferScheduleHours(label, weekday, parserRules, context = {}) {
   const startMins = parseTimeStartMins(label);
   const structuralNightPatrol = sectionKind === 'patrol' && startMins != null && startMins >= 20*60;
   if (structuralNightPatrol && !sourceText.includes('晚巡')) {
-    const rule = rules.hourRules.find(r=>r.keyword === '晚巡') || {hours:1,sundayMultiplier:2,kind:'night_patrol'};
+    const rule = rules.hourRules.find(r=>r.keyword === '晚巡') || {hours:1,sundayMultiplier:1,kind:'night_patrol'};
     return {
       hours: rule.hours * (sunday ? rule.sundayMultiplier : 1),
       kind: 'night_patrol',
-      reason: sunday ? '周日晚巡双倍' : '晚巡',
+      reason: '晚巡',
     };
   }
 
@@ -283,7 +362,8 @@ function buildGrid(ws) {
   const mergeVals = {};
   for (const m of (ws['!merges']||[])) {
     const topLeft = ws[XLSX.utils.encode_cell({r:m.s.r, c:m.s.c})];
-    const val = topLeft?.v != null ? normStr(String(topLeft.v)) : null;
+    const rawValue = topLeft?.v != null ? revisionCellBaseValue(topLeft.v) : null;
+    const val = rawValue != null ? normStr(String(rawValue)) : null;
     for (let r=m.s.r; r<=m.e.r; r++)
       for (let cc=m.s.c; cc<=m.e.c; cc++)
         mergeVals[`${r},${cc}`] = val;
@@ -292,7 +372,9 @@ function buildGrid(ws) {
     const key = `${r},${cc}`;
     if (key in mergeVals) return mergeVals[key] || null;
     const cell = ws[XLSX.utils.encode_cell({r, c:cc})];
-    return cell?.v != null ? normStr(String(cell.v)) : null;
+    if (cell?.v == null) return null;
+    const rawValue = revisionCellBaseValue(cell.v);
+    return rawValue != null ? normStr(String(rawValue)) : null;
   };
 }
 
@@ -324,6 +406,14 @@ function parseScheduleSheetNew(ws, types, personnel, parserRules, parseOptions =
   const G = buildGrid(ws);
   const getMergeAnchor = buildMergeAnchorGetter(ws);
   const {maxR, maxC} = getSheetDims(ws);
+  const revisionAnnotations = {};
+  for (let r=0; r<=maxR; r++) {
+    for (let cc=0; cc<=maxC; cc++) {
+      const cell = ws[XLSX.utils.encode_cell({r, c:cc})];
+      const ann = parseRevisionCellPayload(cell?.v);
+      if (ann) revisionAnnotations[`${r},${cc}`] = ann;
+    }
+  }
   const rawGrid = Array.from({length:maxR+1}, (_, r)=>
     Array.from({length:maxC+1}, (_, cc)=>({ val: G(r,cc) || '' }))
   );
@@ -386,8 +476,7 @@ function parseScheduleSheetNew(ws, types, personnel, parserRules, parseOptions =
     };
 
     // Prefer the nearest explicit section title above this 签到 header.
-    // Do not aggregate arbitrary rows: merged task labels from the previous block
-    // (e.g. A4:A8 = “晚巡21:00-22:00”) otherwise leak into the next 值班 block.
+    // Stop at a blank row so merged labels from a previous block cannot leak in.
     for (let rr=hr-1; rr>=Math.max(0,hr-6); rr--) {
       const rowVals = [];
       for (let cc=0; cc<=maxC; cc++) {
@@ -395,25 +484,19 @@ function parseScheduleSheetNew(ws, types, personnel, parserRules, parseOptions =
         if (v) rowVals.push(v);
       }
       if (rowVals.length === 0) break;
-
       const title = rowVals.find(v =>
         (/(排班|安排)/.test(v) && /巡视|巡查|晚巡|值班/.test(v)) ||
         /(巡视组|值班组|周末值班|中午巡视)/.test(v)
       );
-      if (title) {
-        const kind = classify(title);
-        return { kind, label:title };
-      }
+      if (title) return { kind: classify(title), label:title };
     }
 
-    // Fallback to the current header only. This cannot cross into the previous block.
     const headerVals = [];
     for (let cc=0; cc<=maxC; cc++) {
       const v = G(hr,cc);
       if (v) headerVals.push(v);
     }
-    const joined = headerVals.join(' ');
-    const kind = classify(joined);
+    const kind = classify(headerVals.join(' '));
     return { kind, label: kind === 'patrol' ? '巡视区' : kind === 'duty' ? '值班区' : '排班区' };
   }
 
@@ -641,6 +724,7 @@ function parseScheduleSheetNew(ws, types, personnel, parserRules, parseOptions =
     cellTypeName,
     cellSlotMap,
     leaderCandidates,
+    revisionAnnotations,
   };
 }
 
